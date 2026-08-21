@@ -47,8 +47,8 @@ login.live.com / graph.microsoft.com / *.onedrive.com / *.sharepoint.com gibt es
 sonst TLS-Fehler beim Login bzw. Transfer.
 
 Aufruf:
-    python3 OneDrive_Copy.py
-    python3 OneDrive_Copy.py --ca-cert-bundle /pfad/zum/firmen-ca-bundle.pem
+    python3 onedrive-sharepoint-migration-tool.py
+    python3 onedrive-sharepoint-migration-tool.py --ca-cert-bundle /pfad/zum/firmen-ca-bundle.pem
 """
 
 import argparse
@@ -244,6 +244,14 @@ def fetch_own_drive(token_json: str, ca_cert_bundle: str | None) -> tuple[str, s
     return drive["id"], drive.get("driveType", "personal"), identity
 
 
+# Bekannte Namen des "Persoenlichen Tresors" (Personal Vault) in verschiedenen
+# Sprachen. Der Tresor ist per API grundsaetzlich nicht zugaenglich (braucht
+# eine interaktive PIN/2FA-Entsperrung, die ein Graph-Token nicht leisten
+# kann) - jeder Kopierversuch schlaegt garantiert fehl ("ObjectHandle is
+# Invalid"). Wird deshalb immer automatisch ausgeschlossen, nie nur markiert.
+KNOWN_LOCKED_VAULT_NAMES = {"persönlicher tresor", "personal vault"}
+
+
 def list_root_items(token_json: str, drive_id: str, ca_cert_bundle: str | None) -> list[dict]:
     """Listet Root-Eintraege der angegebenen Drive (OneDrive-Account ODER
     SharePoint-Dokumentbibliothek - '/drives/{id}/root/children' funktioniert
@@ -272,15 +280,23 @@ def list_root_items(token_json: str, drive_id: str, ca_cert_bundle: str | None) 
                 match = site_url_re.search(site_url)
                 remote_drive_id = match.group(1).lower() if match else None
                 is_foreign = remote_drive_id != own_drive_id_lower
-            items.append({"name": item["name"], "is_folder": "folder" in item, "is_foreign": is_foreign})
+            is_locked_vault = bool(remote) and item["name"].strip().lower() in KNOWN_LOCKED_VAULT_NAMES
+            items.append({
+                "name": item["name"],
+                "is_folder": "folder" in item,
+                "is_foreign": is_foreign,
+                "is_locked_vault": is_locked_vault,
+            })
         url = page.get("@odata.nextLink")
     return items
 
 
 def prompt_folder_selection(root_items: list[dict]) -> list[str]:
     """Zeigt alle Ordner (auch fremd verknuepfte, deutlich markiert) an; die
-    Auswahl selbst entscheidet, ob ein markierter Ordner mitkopiert wird."""
-    folder_items = [item for item in root_items if item["is_folder"]]
+    Auswahl selbst entscheidet, ob ein markierter Ordner mitkopiert wird. Der
+    Persoenliche Tresor wird hier erst gar nicht angeboten, da er nie
+    kopierbar ist (siehe KNOWN_LOCKED_VAULT_NAMES)."""
+    folder_items = [item for item in root_items if item["is_folder"] and not item["is_locked_vault"]]
     print("\nVerfuegbare Ordner:")
     for i, item in enumerate(folder_items, start=1):
         marker = "  [Verknuepfung aus ANDEREM Konto/Site]" if item["is_foreign"] else ""
@@ -584,6 +600,13 @@ def main() -> None:
         selected_folders = prompt_folder_selection(root_items)
         print("Ausgewaehlt: " + ", ".join(selected_folders))
     else:
+        vault_names = [item["name"] for item in root_items if item["is_locked_vault"]]
+        if vault_names:
+            print("\nFolgende Eintraege sind per API nicht zugaenglich (z.B. Persoenlicher Tresor) und werden automatisch uebersprungen:")
+            for name in vault_names:
+                print(f"  - {name}")
+            exclude_names += vault_names
+
         foreign_names = [item["name"] for item in root_items if item["is_foreign"]]
         if foreign_names:
             print("\nFolgende Eintraege sind Verknuepfungen zu Inhalten aus einem ANDEREN Konto/einer anderen Site:")
@@ -591,8 +614,8 @@ def main() -> None:
                 print(f"  - {name}")
             answer = input("Diese von der Migration ausschliessen? (j/n, Standard j): ").strip().lower()
             if answer != "n":
-                exclude_names = foreign_names
-        else:
+                exclude_names += foreign_names
+        elif not vault_names:
             print("Keine Verknuepfungen zu fremden Konten/Sites im Root gefunden.")
 
     # --- Ziel ---

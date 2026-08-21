@@ -1,7 +1,17 @@
 @echo off
 REM Doppelklick-Starter fuer Windows: oeffnet ein Konsolenfenster und fuehrt
 REM das Script darin aus (Explorer fuehrt .bat-Dateien so per Doppelklick aus).
+REM Wenn onedrive-sharepoint-migration-tool.exe (im selben Ordner) existiert -
+REM eine mit PyInstaller gebaute, eigenstaendige Binary mit Python UND rclone
+REM bereits eingebettet - wird die direkt verwendet, kein separates Python/
+REM winget/rclone-Setup mehr noetig. Sonst wie gewohnt Fallback auf py/python
+REM (mit Auto-Install).
 cd /d "%~dp0"
+
+if exist "onedrive-sharepoint-migration-tool.exe" (
+    onedrive-sharepoint-migration-tool.exe %*
+    goto :end
+)
 
 where py >nul 2>nul
 if %errorlevel%==0 goto :run_py
@@ -32,11 +42,11 @@ echo Python-Installation fehlgeschlagen. Bitte manuell installieren: https://www
 goto :end
 
 :run_py
-py OneDrive_Copy.py %*
+py onedrive-sharepoint-migration-tool.py %*
 goto :end
 
 :run_python
-python OneDrive_Copy.py %*
+python onedrive-sharepoint-migration-tool.py %*
 goto :end
 
 :end

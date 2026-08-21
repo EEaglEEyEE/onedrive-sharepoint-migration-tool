@@ -51,8 +51,8 @@ automatically, and opens the log (plus an extracted error log) when done.
 ## Usage
 
 ```
-python3 OneDrive_Copy.py
-python3 OneDrive_Copy.py --ca-cert-bundle /path/to/corporate-ca-bundle.pem
+python3 onedrive-sharepoint-migration-tool.py
+python3 onedrive-sharepoint-migration-tool.py --ca-cert-bundle /path/to/corporate-ca-bundle.pem
 ```
 
 `--ca-cert-bundle` is only needed if you're behind a TLS-inspecting corporate
@@ -62,10 +62,10 @@ proxy/firewall (Cato, Zscaler, etc.) and haven't set up a bypass rule for
 
 ### Double-click launchers
 
-- **macOS**: `OneDrive_Copy.command` — runs a bundled `OneDrive_Copy` binary if
+- **macOS**: `onedrive-sharepoint-migration-tool.command` — runs a bundled `onedrive-sharepoint-migration-tool` binary if
   present (see Packaging below), otherwise falls back to `python3
-  OneDrive_Copy.py` (auto-installing Python via Homebrew if missing).
-- **Windows**: `OneDrive_Copy.bat` — runs `OneDrive_Copy.exe` if present,
+  onedrive-sharepoint-migration-tool.py` (auto-installing Python via Homebrew if missing).
+- **Windows**: `onedrive-sharepoint-migration-tool.bat` — runs `onedrive-sharepoint-migration-tool.exe` if present,
   otherwise falls back to `py`/`python`, auto-installing Python via `winget`
   if missing.
 
@@ -77,13 +77,13 @@ nothing pre-installed:
 
 ```bash
 pip install pyinstaller
-# place a matching rclone binary next to OneDrive_Copy.py first
+# place a matching rclone binary next to onedrive-sharepoint-migration-tool.py first
 
 # macOS/Linux:
-pyinstaller --onefile --console --name OneDrive_Copy --add-binary "rclone:." OneDrive_Copy.py
+pyinstaller --onefile --console --name onedrive-sharepoint-migration-tool --add-binary "rclone:." onedrive-sharepoint-migration-tool.py
 
 # Windows (note the ";" instead of ":"):
-pyinstaller --onefile --console --name OneDrive_Copy --add-binary "rclone.exe;." OneDrive_Copy.py
+pyinstaller --onefile --console --name onedrive-sharepoint-migration-tool --add-binary "rclone.exe;." onedrive-sharepoint-migration-tool.py
 ```
 
 See [BUILD_WINDOWS.txt](BUILD_WINDOWS.txt) for detailed step-by-step Windows
