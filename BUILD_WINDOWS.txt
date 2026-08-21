@@ -1,0 +1,52 @@
+Windows-EXE selbst bauen (einmalig, auf einem echten Windows-Rechner)
+======================================================================
+
+Warum: PyInstaller baut nur fuer das Betriebssystem, auf dem es laeuft - eine
+echte Windows-.exe kann nicht von diesem Mac aus gebaut werden. Die macOS-
+Variante (OneDrive_Copy, ohne Dateiendung) ist bereits fertig und enthaelt
+Python + rclone eingebettet - keine separate Installation mehr noetig.
+
+Schritte auf einem Windows-Rechner:
+
+1. Python installieren (falls noch nicht vorhanden):
+   https://www.python.org/downloads/ -> beim Installer "Add python.exe to PATH" anhaken.
+
+2. PowerShell oder cmd oeffnen, in den Ordner mit OneDrive_Copy.py wechseln, dann:
+
+     pip install pyinstaller
+
+3. Aktuelle rclone-Windows-Version herunterladen und entpacken:
+   https://rclone.org/downloads/ -> "Windows / amd64" -> zip entpacken,
+   rclone.exe in den GLEICHEN Ordner wie OneDrive_Copy.py legen.
+
+4. Build starten (Windows nutzt ";" statt ":" bei --add-binary!). Ueber
+   "python -m PyInstaller" statt nur "pyinstaller" aufrufen - sonst kommt oft
+   "'pyinstaller' is not recognized", weil pip das Kommando in einen Ordner
+   installiert, der nicht automatisch im PATH liegt (z.B. .../Scripts):
+
+     python -m PyInstaller --onefile --console --name OneDrive_Copy --add-binary "rclone.exe;." OneDrive_Copy.py
+
+   Falls "python" ebenfalls nicht gefunden wird, stattdessen "py -m PyInstaller ...".
+
+   Ergebnis liegt danach in: dist\OneDrive_Copy.exe
+   (einzelne Datei, Python + rclone bereits eingebettet, ca. 30-40 MB)
+
+5. dist\OneDrive_Copy.exe in den gewuenschten Zielordner kopieren.
+
+6. OneDrive_Copy.bat durch folgenden, vereinfachten Inhalt ersetzen (kein
+   Python/winget-Setup mehr noetig, da alles in der .exe eingebettet ist):
+
+     @echo off
+     cd /d "%~dp0"
+     OneDrive_Copy.exe %*
+     echo.
+     pause
+
+Danach genuegt ein Doppelklick auf die .bat (oder direkt auf die .exe) - ohne
+vorherige Python- oder rclone-Installation auf dem Zielrechner.
+
+Hinweis zu SmartScreen/Antivirus: Eine unsignierte, frisch gebaute .exe wird
+von Windows SmartScreen beim ersten Start oft als "unbekannter Herausgeber"
+gemeldet. Ueber "Weitere Informationen" -> "Trotzdem ausfuehren" bestaetigen.
+Das laesst sich nur durch ein kostenpflichtiges Code-Signing-Zertifikat
+vermeiden - fuer ein persoenliches Tool in der Regel nicht notwendig.
