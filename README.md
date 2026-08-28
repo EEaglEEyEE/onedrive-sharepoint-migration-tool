@@ -43,11 +43,15 @@ when done.
 ### Tool 2: Find duplicates
 
 Scans an account (saved or freshly logged into) with `rclone lsjson -R
---hash` and writes a CSV report classifying files into:
+--hash` and writes a CSV report (saved to the Desktop by default) classifying
+files into:
 
 - **1_sicheres_duplikat** — same name *and* same hash (safe to dedupe)
 - **2_nur_name_gleich** — same filename, different content (needs a manual look)
 - **3_nur_hash_gleich** — identical content, different filename (renamed copy)
+
+Like the copy tool, it automatically skips the Personal Vault and asks before
+including folders that are shortcuts to someone else's OneDrive/SharePoint.
 
 Afterwards it can optionally delete the safe duplicates (category 1, oldest
 copy per group kept) — always with an explicit confirmation, never
@@ -125,12 +129,14 @@ Windows executable must be built on Windows.
 ## Logs & data
 
 - Run logs are written to `~/Logs` on macOS/Linux and `C:\Logs` on Windows.
-- Everything else (temporary per-run `rclone_*.conf` files, deleted again at
-  the end of each run, the persistent `accounts.conf`, and duplicate-finder
-  CSV reports) lives under `~/Claude/onedrive-sharepoint-migration-tool`.
+- Temporary per-run `rclone_*.conf` files (deleted again at the end of each
+  run) and the persistent `accounts.conf` live under
+  `~/Claude/onedrive-sharepoint-migration-tool`.
 - `accounts.conf` contains long-lived OAuth tokens for every saved account —
   treat it like a password file. It's created with owner-only file
   permissions and is excluded from this repository via `.gitignore`.
+- Duplicate-finder CSV reports default to the Desktop on both macOS and
+  Windows (you can enter a different path when prompted).
 
 ## License
 

@@ -110,6 +110,7 @@ GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 
 WORK_DIR = Path.home() / "Claude" / "onedrive-sharepoint-migration-tool"
 ACCOUNTS_CONFIG_PATH = WORK_DIR / "accounts.conf"
+DESKTOP_DIR = Path.home() / "Desktop"
 
 
 def _resolve_rclone_bin() -> str:
@@ -536,6 +537,34 @@ def prompt_site_selection(token_json: str, ca_cert_bundle: str | None) -> dict:
         print(f"Nummer ausserhalb des Bereichs: {index}")
 
 
+def detect_root_exclusions(root_items: list[dict]) -> list[str]:
+    """Ermittelt automatisch auszuschliessende Root-Eintraege: der Persoenliche
+    Tresor wird immer ausgeschlossen (per API grundsaetzlich nicht zugaenglich),
+    bei Verknuepfungen zu Inhalten aus einem ANDEREN Konto/einer anderen Site
+    wird gefragt (Standard: ausschliessen). Gibt die betroffenen Namen zurueck
+    - Aufrufer baut daraus '--exclude "<name>/**"'-Muster."""
+    exclude_names: list[str] = []
+    vault_names = [item["name"] for item in root_items if item["is_locked_vault"]]
+    if vault_names:
+        print("\nFolgende Eintraege sind per API nicht zugaenglich (z.B. Persoenlicher Tresor) und werden automatisch uebersprungen:")
+        for name in vault_names:
+            print(f"  - {name}")
+        exclude_names += vault_names
+
+    foreign_names = [item["name"] for item in root_items if item["is_foreign"]]
+    if foreign_names:
+        print("\nFolgende Eintraege sind Verknuepfungen zu Inhalten aus einem ANDEREN Konto/einer anderen Site:")
+        for name in foreign_names:
+            print(f"  - {name}")
+        answer = input("Diese ausschliessen? (j/n, Standard j): ").strip().lower()
+        if answer != "n":
+            exclude_names += foreign_names
+    elif not vault_names:
+        print("Keine Verknuepfungen zu fremden Konten/Sites im Root gefunden.")
+
+    return exclude_names
+
+
 def prompt_endpoint_type(label: str) -> str:
     print(f"\n=== {label} ===")
     print("  1. OneDrive")
@@ -739,23 +768,7 @@ def run_copy_tool(args, env: dict, config_path: Path, log_file: Path) -> int:
         selected_folders = prompt_folder_selection(root_items)
         print("Ausgewaehlt: " + ", ".join(selected_folders))
     else:
-        vault_names = [item["name"] for item in root_items if item["is_locked_vault"]]
-        if vault_names:
-            print("\nFolgende Eintraege sind per API nicht zugaenglich (z.B. Persoenlicher Tresor) und werden automatisch uebersprungen:")
-            for name in vault_names:
-                print(f"  - {name}")
-            exclude_names += vault_names
-
-        foreign_names = [item["name"] for item in root_items if item["is_foreign"]]
-        if foreign_names:
-            print("\nFolgende Eintraege sind Verknuepfungen zu Inhalten aus einem ANDEREN Konto/einer anderen Site:")
-            for name in foreign_names:
-                print(f"  - {name}")
-            answer = input("Diese von der Migration ausschliessen? (j/n, Standard j): ").strip().lower()
-            if answer != "n":
-                exclude_names += foreign_names
-        elif not vault_names:
-            print("Keine Verknuepfungen zu fremden Konten/Sites im Root gefunden.")
+        exclude_names = detect_root_exclusions(root_items)
 
     # --- Ziel ---
     target_info = resolve_endpoint(env, "Ziel", args.ca_cert_bundle, config_path)
@@ -1106,10 +1119,19 @@ def run_dedupe_tool(args, env: dict, config_path: Path, timestamp: str) -> int:
         config_path.unlink(missing_ok=True)
         return scan_exit
 
-    default_output = str(WORK_DIR / f"dedupe_report_{timestamp}.csv")
+    print("\nErmittle Inhalt des Kontos...")
+    try:
+        root_items = list_root_items(scan_info["token"], scan_info["drive_id"], args.ca_cert_bundle)
+    except (urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
+        print(f"\nKonnte Ordnerliste nicht ermitteln: {exc}")
+        config_path.unlink(missing_ok=True)
+        return 1
+    auto_exclude_patterns = [f"{name}/**" for name in detect_root_exclusions(root_items)]
+
+    default_output = str(DESKTOP_DIR / f"dedupe_report_{timestamp}.csv")
     output_path = input(f"\nCSV-Ausgabepfad (Enter fuer '{default_output}'): ").strip() or default_output
-    raw_exclude = input("Auszuschliessende Muster, kommagetrennt (Enter fuer keine, z.B. '_Archiv/**'): ").strip()
-    excludes = [p.strip() for p in raw_exclude.split(",") if p.strip()] if raw_exclude else []
+    raw_exclude = input("Weitere auszuschliessende Muster, kommagetrennt (Enter fuer keine, z.B. '_Archiv/**'): ").strip()
+    excludes = auto_exclude_patterns + ([p.strip() for p in raw_exclude.split(",") if p.strip()] if raw_exclude else [])
 
     files = list_files_for_dedupe("scan:", env, excludes)
     if files is None:
