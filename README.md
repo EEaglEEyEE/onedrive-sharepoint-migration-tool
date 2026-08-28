@@ -47,8 +47,8 @@ when done.
 ### Tool 2: Find duplicates
 
 Scans an account (saved or freshly logged into) with `rclone lsjson -R
---hash` and writes a CSV report (saved to the Desktop by default) classifying
-files into:
+--hash` and writes a CSV report (`dedupe_report_<account-name>_<timestamp>.csv`,
+saved to the Desktop by default) classifying files into:
 
 - **1_sicheres_duplikat** — same name *and* same hash (safe to dedupe)
 - **2_nur_name_gleich** — same filename, different content (needs a manual look)

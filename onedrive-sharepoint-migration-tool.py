@@ -1026,6 +1026,15 @@ def primary_hash(record: dict) -> str | None:
     return None
 
 
+def slugify_for_filename(text: str) -> str:
+    """Macht einen String dateinamen-sicher (Windows/macOS/Linux) - ersetzt
+    verbotene/unhandliche Zeichen durch '_' und kappt Mehrfach-Unterstriche."""
+    safe = re.sub(r'[<>:"/\\|?*]', "_", text)
+    safe = re.sub(r"\s+", "_", safe.strip())
+    safe = re.sub(r"_+", "_", safe)
+    return safe.strip("_")
+
+
 def _dedupe_row(category: str, group_id: int, f: dict, share_label: str) -> dict:
     return {
         "Kategorie": category,
@@ -1142,6 +1151,7 @@ def run_dedupe_tool(args, env: dict, config_path: Path, timestamp: str) -> int:
         config_path.unlink(missing_ok=True)
         return 1
     scan_info["token"] = refreshed_token
+    own_label = scan_info.get("account_name") or scan_info["identity"]
 
     print("\nErmittle Inhalt des Kontos...")
     try:
@@ -1157,7 +1167,7 @@ def run_dedupe_tool(args, env: dict, config_path: Path, timestamp: str) -> int:
     # ausgeschlossen (per API ohnehin nicht zugaenglich).
     auto_exclude_patterns = [f"{name}/**" for name in detect_root_exclusions(root_items, ask_about_foreign=False)]
 
-    default_output = str(DESKTOP_DIR / f"dedupe_report_{timestamp}.csv")
+    default_output = str(DESKTOP_DIR / f"dedupe_report_{slugify_for_filename(own_label)}_{timestamp}.csv")
     output_path = input(f"\nCSV-Ausgabepfad (Enter fuer '{default_output}'): ").strip() or default_output
     raw_exclude = input("Weitere auszuschliessende Muster, kommagetrennt (Enter fuer keine, z.B. '_Archiv/**'): ").strip()
     excludes = auto_exclude_patterns + ([p.strip() for p in raw_exclude.split(",") if p.strip()] if raw_exclude else [])
@@ -1169,7 +1179,6 @@ def run_dedupe_tool(args, env: dict, config_path: Path, timestamp: str) -> int:
     print(f"{len(files)} Dateien gefunden.")
 
     foreign_names = {item["name"] for item in root_items if item["is_foreign"]}
-    own_label = scan_info.get("account_name") or scan_info["identity"]
     rows = build_report_rows(files, own_label, foreign_names)
     write_dedupe_csv(rows, output_path)
     open_in_viewer(output_path)
