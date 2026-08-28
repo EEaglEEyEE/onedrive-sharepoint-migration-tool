@@ -50,10 +50,12 @@ files into:
 - **2_nur_name_gleich** — same filename, different content (needs a manual look)
 - **3_nur_hash_gleich** — identical content, different filename (renamed copy)
 
-Like the copy tool, it automatically skips the Personal Vault and asks before
-including folders that are shortcuts to someone else's OneDrive/SharePoint.
-The CSV opens automatically once it's written — the tool itself never
-deletes anything, the report is purely for review.
+It always skips the Personal Vault (inaccessible via the API regardless), but
+— unlike the copy tool — it does NOT exclude folders that are shortcuts to
+someone else's OneDrive/SharePoint; those are scanned too, so duplicates
+across shared content are found as well. The CSV opens automatically once
+it's written — the tool itself never deletes anything, the report is purely
+for review.
 
 ### Why not just use rclone directly?
 

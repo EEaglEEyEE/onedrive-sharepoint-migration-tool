@@ -64,7 +64,10 @@ nur AUSGEWAEHLTE Ordner, und in welchen Ziel-Unterordner (leer = Root).
 
 --- Werkzeug 2: Duplikate finden ---
 Fragt ein Konto ab (gespeichert oder neu), durchsucht es rekursiv per 'rclone
-lsjson -R --hash' und erzeugt eine CSV mit drei Kategorien:
+lsjson -R --hash' (bewusst INKLUSIVE Verknuepfungen zu Fremd-Shares aus
+anderen OneDrive-/SharePoint-Konten - anders als beim Kopieren wird hier nicht
+gefragt/ausgeschlossen, nur der ohnehin unzugaengliche Persoenliche Tresor
+bleibt aussen vor) und erzeugt eine CSV mit drei Kategorien:
 
   1. Sichere Duplikate - gleicher Name UND gleicher Hash
   2. Nur Name gleich   - gleicher Dateiname, aber unterschiedlicher Inhalt
@@ -537,12 +540,15 @@ def prompt_site_selection(token_json: str, ca_cert_bundle: str | None) -> dict:
         print(f"Nummer ausserhalb des Bereichs: {index}")
 
 
-def detect_root_exclusions(root_items: list[dict]) -> list[str]:
+def detect_root_exclusions(root_items: list[dict], ask_about_foreign: bool = True) -> list[str]:
     """Ermittelt automatisch auszuschliessende Root-Eintraege: der Persoenliche
-    Tresor wird immer ausgeschlossen (per API grundsaetzlich nicht zugaenglich),
-    bei Verknuepfungen zu Inhalten aus einem ANDEREN Konto/einer anderen Site
-    wird gefragt (Standard: ausschliessen). Gibt die betroffenen Namen zurueck
-    - Aufrufer baut daraus '--exclude "<name>/**"'-Muster."""
+    Tresor wird immer ausgeschlossen (per API grundsaetzlich nicht zugaenglich).
+    Bei Verknuepfungen zu Inhalten aus einem ANDEREN Konto/einer anderen Site
+    wird - falls ask_about_foreign gesetzt ist - gefragt (Standard: ausschliessen);
+    ist es False, werden sie nur informativ aufgelistet und bleiben eingeschlossen
+    (z.B. beim Duplikat-Scan gewuenscht, um Duplikate AUCH ueber Fremd-Shares
+    hinweg zu finden). Gibt die tatsaechlich auszuschliessenden Namen zurueck -
+    Aufrufer baut daraus '--exclude "<name>/**"'-Muster."""
     exclude_names: list[str] = []
     vault_names = [item["name"] for item in root_items if item["is_locked_vault"]]
     if vault_names:
@@ -552,13 +558,17 @@ def detect_root_exclusions(root_items: list[dict]) -> list[str]:
         exclude_names += vault_names
 
     foreign_names = [item["name"] for item in root_items if item["is_foreign"]]
-    if foreign_names:
+    if foreign_names and ask_about_foreign:
         print("\nFolgende Eintraege sind Verknuepfungen zu Inhalten aus einem ANDEREN Konto/einer anderen Site:")
         for name in foreign_names:
             print(f"  - {name}")
         answer = input("Diese ausschliessen? (j/n, Standard j): ").strip().lower()
         if answer != "n":
             exclude_names += foreign_names
+    elif foreign_names:
+        print("\nFolgende Eintraege sind Verknuepfungen zu Inhalten aus einem ANDEREN Konto/einer anderen Site - werden mit einbezogen:")
+        for name in foreign_names:
+            print(f"  - {name}")
     elif not vault_names:
         print("Keine Verknuepfungen zu fremden Konten/Sites im Root gefunden.")
 
@@ -1027,7 +1037,12 @@ def run_dedupe_tool(args, env: dict, config_path: Path, timestamp: str) -> int:
         print(f"\nKonnte Ordnerliste nicht ermitteln: {exc}")
         config_path.unlink(missing_ok=True)
         return 1
-    auto_exclude_patterns = [f"{name}/**" for name in detect_root_exclusions(root_items)]
+    # Anders als beim Kopieren werden Verknuepfungen zu Fremd-Shares beim
+    # Duplikat-Scan NICHT ausgeschlossen (ask_about_foreign=False) - Duplikate
+    # sollen bewusst auch ueber geteilte OneDrive-/SharePoint-Verknuepfungen
+    # hinweg gefunden werden. Der Persoenliche Tresor bleibt trotzdem
+    # ausgeschlossen (per API ohnehin nicht zugaenglich).
+    auto_exclude_patterns = [f"{name}/**" for name in detect_root_exclusions(root_items, ask_about_foreign=False)]
 
     default_output = str(DESKTOP_DIR / f"dedupe_report_{timestamp}.csv")
     output_path = input(f"\nCSV-Ausgabepfad (Enter fuer '{default_output}'): ").strip() or default_output
