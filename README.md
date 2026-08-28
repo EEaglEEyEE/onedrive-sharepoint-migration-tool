@@ -52,10 +52,8 @@ files into:
 
 Like the copy tool, it automatically skips the Personal Vault and asks before
 including folders that are shortcuts to someone else's OneDrive/SharePoint.
-
-Afterwards it can optionally delete the safe duplicates (category 1, oldest
-copy per group kept) — always with an explicit confirmation, never
-automatically.
+The CSV opens automatically once it's written — the tool itself never
+deletes anything, the report is purely for review.
 
 ### Why not just use rclone directly?
 

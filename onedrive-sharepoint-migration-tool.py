@@ -70,9 +70,9 @@ lsjson -R --hash' und erzeugt eine CSV mit drei Kategorien:
   2. Nur Name gleich   - gleicher Dateiname, aber unterschiedlicher Inhalt
   3. Nur Hash gleich   - identischer Inhalt, aber unterschiedlicher Dateiname
 
-Optional koennen danach die sicheren Duplikate (Kategorie 1) geloescht werden
-(aeltestes Exemplar pro Gruppe bleibt erhalten) - immer erst nach expliziter
-Bestaetigung, nie automatisch.
+Die CSV wird direkt nach dem Erstellen automatisch geoeffnet. Das Tool
+loescht selbst nichts - die CSV dient rein der Uebersicht, allfaellige
+Loeschungen macht der Nutzer manuell (z.B. in OneDrive/SharePoint direkt).
 
 --- Allgemein ---
 TLS-Inspection (z.B. durch einen Firmen-Proxy/Firewall wie Cato, Zscaler etc.):
@@ -992,105 +992,6 @@ def write_dedupe_csv(rows: list[dict], output_path: str) -> None:
         writer.writerows(rows)
 
 
-def join_remote_path(remote: str, path: str) -> str:
-    """Haengt einen relativen Pfad korrekt an ein rclone-Remote an, egal ob
-    das Remote als 'name:' (bloss Doppelpunkt) oder 'name:Unterordner' (schon
-    mit Pfad) angegeben wurde."""
-    if remote.endswith(":"):
-        return f"{remote}{path}"
-    return f"{remote.rstrip('/')}/{path}"
-
-
-def parse_modtime(value: str) -> datetime.datetime:
-    """Parst rclones ModTime-Format (ISO 8601, oft mit Nanosekunden-Praezision,
-    die Pythons fromisoformat nicht mag) robust - Bruchteil auf 6 Stellen
-    (Mikrosekunden) kappen."""
-    if "." in value:
-        head, rest = value.split(".", 1)
-        frac_digits = 0
-        for ch in rest:
-            if ch.isdigit():
-                frac_digits += 1
-            else:
-                break
-        frac, tz = rest[:frac_digits], rest[frac_digits:]
-        value = f"{head}.{frac[:6]}{tz}"
-    return datetime.datetime.fromisoformat(value)
-
-
-def human_size(num_bytes: float) -> str:
-    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if abs(num_bytes) < 1024:
-            return f"{num_bytes:.1f} {unit}"
-        num_bytes /= 1024
-    return f"{num_bytes:.1f} PiB"
-
-
-def read_report_csv(path: str) -> list[dict]:
-    with open(path, "r", newline="", encoding="utf-8-sig") as f:
-        return list(csv.DictReader(f))
-
-
-def plan_deletions(rows: list[dict]) -> list[dict]:
-    """Gruppiert Kategorie-1-Zeilen nach 'Gruppe', behaelt pro Gruppe die
-    Kopie mit dem fruehesten Aenderungsdatum und schlaegt alle anderen zum
-    Loeschen vor."""
-    groups = defaultdict(list)
-    for row in rows:
-        if row["Kategorie"] != "1_sicheres_duplikat":
-            continue
-        groups[row["Gruppe"]].append(row)
-
-    to_delete: list[dict] = []
-    for group in groups.values():
-        if len(group) < 2:
-            continue
-        try:
-            group_sorted = sorted(group, key=lambda r: parse_modtime(r["Letzte_Aenderung"]))
-        except ValueError:
-            # Unparsbares Datum - sicherheitshalber diese Gruppe ueberspringen
-            # statt zu raten, welche Kopie die "aelteste" ist.
-            continue
-        to_delete += group_sorted[1:]
-    return to_delete
-
-
-def run_delete_workflow(remote: str, csv_path: str, env: dict) -> None:
-    rows = read_report_csv(csv_path)
-    planned = plan_deletions(rows)
-
-    if not planned:
-        print("Keine loeschbaren sicheren Duplikate im Report gefunden.")
-        return
-
-    total_size = sum(int(r["Groesse"] or 0) for r in planned)
-    print(f"\n{len(planned)} Datei(en) zum Loeschen vorgemerkt ({human_size(total_size)} werden frei):\n")
-    for r in planned:
-        print(f"  LOESCHEN: {r['Pfad']}  ({human_size(int(r['Groesse'] or 0))}, {r['Letzte_Aenderung']})")
-
-    answer = input(f"\n{len(planned)} Datei(en) wirklich loeschen? Tippe 'loeschen' zum Bestaetigen: ").strip()
-    if answer.lower() != "loeschen":
-        print("Abgebrochen - nichts geloescht.")
-        return
-
-    log_path = Path(csv_path).with_name(Path(csv_path).stem + "_geloescht.log")
-    deleted, failed = 0, 0
-    with open(log_path, "w", encoding="utf-8") as log:
-        for r in planned:
-            target = join_remote_path(remote, r["Pfad"])
-            print(f"Loesche: {target}")
-            result = subprocess.run([RCLONE_BIN, "deletefile", target], env=env, capture_output=True, text=True)
-            if result.returncode == 0:
-                deleted += 1
-                log.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S} GELOESCHT: {target}\n")
-            else:
-                failed += 1
-                print(f"  FEHLER: {result.stderr.strip()}")
-                log.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S} FEHLER bei {target}: {result.stderr.strip()}\n")
-
-    print(f"\n{deleted} Datei(en) geloescht, {failed} Fehler. Protokoll: {log_path}")
-
-
 def list_files_for_dedupe(remote: str, env: dict, excludes: list[str]) -> list[dict] | None:
     """Ruft 'rclone lsjson' rekursiv mit Hash-Angabe ab und gibt die
     geparsten Datei-Eintraege zurueck (Ordner werden per --files-only
@@ -1141,6 +1042,7 @@ def run_dedupe_tool(args, env: dict, config_path: Path, timestamp: str) -> int:
 
     rows = build_report_rows(files)
     write_dedupe_csv(rows, output_path)
+    open_in_viewer(output_path)
 
     groups_by_category: dict[str, set[int]] = defaultdict(set)
     files_by_category: dict[str, int] = defaultdict(int)
@@ -1159,17 +1061,8 @@ def run_dedupe_tool(args, env: dict, config_path: Path, timestamp: str) -> int:
     if scan_info.get("account_name"):
         sync_account_token(scan_info["account_name"], "scan", config_path)
 
-    if files_by_category["1_sicheres_duplikat"]:
-        answer = input(
-            "\nSichere Duplikate jetzt pruefen und optional loeschen? "
-            "(Empfehlung: erst die CSV in Excel ansehen) (j/n): "
-        ).strip().lower()
-        if answer == "j":
-            run_delete_workflow("scan:", output_path, env)
-
     config_path.unlink(missing_ok=True)
     print("\nrclone.conf (Lauf-Config) geloescht - dauerhaft gespeicherte Konten bleiben in accounts.conf erhalten.")
-    open_in_viewer(output_path)
     return 0
 
 
