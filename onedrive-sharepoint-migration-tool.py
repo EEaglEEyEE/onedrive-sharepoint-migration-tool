@@ -1,8 +1,27 @@
 #!/usr/bin/env python3
 """
-Kopiert Daten zwischen OneDrive-Accounts und/oder SharePoint-Sites via rclone.
-Fragt beim Start interaktiv Quelle UND Ziel unabhaengig voneinander ab (jeweils
-OneDrive oder SharePoint-Site), z.B.:
+Eine App fuer zwei Werkzeuge rund um OneDrive/SharePoint via rclone:
+
+  1. Kopieren/Migrieren zwischen OneDrive-Accounts und/oder SharePoint-Sites
+  2. Duplikate finden (und optional loeschen) in einem einzelnen Konto
+
+Fragt beim Start, welches der beiden Werkzeuge genutzt werden soll, danach je
+nach Werkzeug weitere Fragen (siehe unten).
+
+--- Konten dauerhaft speichern ---
+Bei jedem Login (Quelle/Ziel/zu durchsuchendes Konto) wird zuerst gefragt, ob
+ein BEREITS GESPEICHERTES Konto verwendet werden soll (kein erneuter Login
+noetig - rclone erneuert das Token automatisch im Hintergrund) oder ob eine
+NEUE Anmeldung erfolgen soll. Nach einer neuen Anmeldung wird ein Name dafuer
+vorgeschlagen (z.B. "Jane Doe (Personal)") und das Konto - falls
+gewuenscht - dauerhaft in accounts.conf gespeichert, damit es beim naechsten
+Start direkt ausgewaehlt werden kann. accounts.conf enthaelt langlebige
+Zugangsdaten und wird NIE ins Git-Repo committet (siehe .gitignore) und mit
+restriktiven Dateirechten (nur Besitzer) angelegt.
+
+--- Werkzeug 1: Kopieren/Migrieren ---
+Fragt Quelle UND Ziel unabhaengig voneinander ab (jeweils OneDrive oder
+SharePoint-Site), z.B.:
 
   OneDrive     -> OneDrive
   OneDrive     -> SharePoint-Site
@@ -12,20 +31,19 @@ OneDrive oder SharePoint-Site), z.B.:
 Danach wird gefragt, ob der GESAMTE Inhalt der Quelle kopiert werden soll oder
 nur AUSGEWAEHLTE Ordner, und in welchen Ziel-Unterordner (leer = Root).
 
-Ersetzt die vorherigen Einzelscripte OneDrive_Migration.py und
-Copy_To_SharePoint.py (deren Logik hier zusammengefuehrt ist).
-
-- Login IMMER eigenstaendig per 'rclone authorize' (nicht rclones eingebauter
-  config-Wizard): dessen automatische Drive-Discovery ('/me/drives', Plural)
-  schlaegt fuer OneDrive-Personal-Konten grundsaetzlich mit '403 accessDenied'
-  fehl, unabhaengig von Scopes/Permissions. Die Drive-ID wird stattdessen direkt
-  ueber Microsoft Graph ermittelt (/me/drive fuer den eigenen Account, bzw.
-  /sites/.../drive fuer eine SharePoint-Site) und die rclone-Remote wird
-  non-interaktiv mit Token+Drive-ID angelegt.
+- Login (bei neuer Anmeldung) IMMER eigenstaendig per 'rclone authorize' (nicht
+  rclones eingebauter config-Wizard): dessen automatische Drive-Discovery
+  ('/me/drives', Plural) schlaegt fuer OneDrive-Personal-Konten grundsaetzlich
+  mit '403 accessDenied' fehl, unabhaengig von Scopes/Permissions. Die
+  Drive-ID wird stattdessen direkt ueber Microsoft Graph ermittelt (/me/drive
+  fuer den eigenen Account, bzw. /sites/.../drive fuer eine SharePoint-Site)
+  und die rclone-Remote wird non-interaktiv mit Token+Drive-ID angelegt.
 - Eintraege im Root der Quelle, die aus einem ANDEREN Konto/einer anderen Site
   hierher verknuepft wurden (z.B. per "Add shortcut to My files"), werden
   erkannt und in der Ordnerauswahl deutlich markiert. Bei "gesamten Inhalt
-  kopieren" wird explizit gefragt, ob sie ausgeschlossen werden sollen.
+  kopieren" wird explizit gefragt, ob sie ausgeschlossen werden sollen. Der
+  "Persoenliche Tresor" (Personal Vault) wird immer automatisch ausgeschlossen
+  (per API grundsaetzlich nicht zugaenglich).
 - Ist beim Kopieren einzelner Ordner genau EINER ausgewaehlt, landet dessen
   INHALT direkt im Ziel-Unterordner (kein zusaetzlicher gleichnamiger
   Unterordner). Bei MEHREREN ausgewaehlten Ordnern wird pro Ordner ein
@@ -33,14 +51,30 @@ Copy_To_SharePoint.py (deren Logik hier zusammengefuehrt ist).
 - Jeder Kopiervorgang wird bei Fehlern automatisch bis zu COPY_RETRY_ATTEMPTS
   mal wiederholt (rclone copy ist idempotent - ein erneuter Lauf kopiert nur
   das nach, was beim letzten Versuch fehlte oder fehlerhaft war).
+- Fuer SharePoint- UND OneDrive-Business-Ziele wird die Groessen-/Pruefsummen-
+  pruefung nach Upload deaktiviert, da diese Backends Office-Dateien
+  serverseitig veraendern (siehe Kommentar bei needs_ignore_flags weiter
+  unten) - sonst re-uploaded jeder erneute Lauf faelschlich alles, was bei
+  OneDrive Business unbemerkt die Versionshistorie aufblaeht.
 - Direkt vor dem Kopieren wird eine Zusammenfassung (Quelle, Ziel, Umfang,
   Exclusions, geplante Kopiervorgaenge) angezeigt UND in die Log-Datei
   geschrieben (zusaetzlich zu rclones eigenen Log-Zeilen).
 - Nach Abschluss werden Log-Datei und (falls vorhanden) eine extrahierte
   Fehler-Log-Datei automatisch geoeffnet.
-- Kein dauerhaft gespeichertes Token - die rclone.conf mit den Zugangsdaten
-  wird am Ende geloescht.
 
+--- Werkzeug 2: Duplikate finden ---
+Fragt ein Konto ab (gespeichert oder neu), durchsucht es rekursiv per 'rclone
+lsjson -R --hash' und erzeugt eine CSV mit drei Kategorien:
+
+  1. Sichere Duplikate - gleicher Name UND gleicher Hash
+  2. Nur Name gleich   - gleicher Dateiname, aber unterschiedlicher Inhalt
+  3. Nur Hash gleich   - identischer Inhalt, aber unterschiedlicher Dateiname
+
+Optional koennen danach die sicheren Duplikate (Kategorie 1) geloescht werden
+(aeltestes Exemplar pro Gruppe bleibt erhalten) - immer erst nach expliziter
+Bestaetigung, nie automatisch.
+
+--- Allgemein ---
 TLS-Inspection (z.B. durch einen Firmen-Proxy/Firewall wie Cato, Zscaler etc.):
 siehe --ca-cert-bundle weiter unten. Ohne Bypass-Regel fuer login.microsoftonline.com /
 login.live.com / graph.microsoft.com / *.onedrive.com / *.sharepoint.com gibt es
@@ -52,6 +86,8 @@ Aufruf:
 """
 
 import argparse
+import configparser
+import csv
 import datetime
 import json
 import os
@@ -64,12 +100,16 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import defaultdict
 from pathlib import Path
 
 TRANSFERS = 8
 CHECKERS = 16
 COPY_RETRY_ATTEMPTS = 3
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
+
+WORK_DIR = Path.home() / "Claude" / "onedrive-sharepoint-migration-tool"
+ACCOUNTS_CONFIG_PATH = WORK_DIR / "accounts.conf"
 
 
 def _resolve_rclone_bin() -> str:
@@ -186,6 +226,127 @@ def extract_error_lines(log_file: Path) -> tuple[Path, int]:
     error_lines = [line for line in lines if "ERROR" in line]
     error_file.write_text("\n".join(error_lines) + ("\n" if error_lines else ""), encoding="utf-8")
     return error_file, len(error_lines)
+
+
+# ============================================================
+# Dauerhafter, benannter Konten-Speicher (accounts.conf)
+# ============================================================
+
+def list_saved_accounts() -> list[str]:
+    """Namen aller dauerhaft gespeicherten Konten (leer, falls noch keine
+    accounts.conf existiert)."""
+    if not ACCOUNTS_CONFIG_PATH.exists():
+        return []
+    parser = configparser.ConfigParser()
+    parser.read(ACCOUNTS_CONFIG_PATH)
+    return parser.sections()
+
+
+def load_saved_account(name: str) -> dict:
+    parser = configparser.ConfigParser()
+    parser.read(ACCOUNTS_CONFIG_PATH)
+    return dict(parser[name])
+
+
+def save_account(name: str, token_json: str, drive_id: str, drive_type: str, extra_config: dict[str, str] | None = None) -> None:
+    """Speichert/aktualisiert ein Konto dauerhaft in accounts.conf. Restriktive
+    Dateirechte (nur Besitzer), da langlebige Zugangsdaten fuer ggf. mehrere
+    Personen darin liegen - diese Datei darf NIE ins Git-Repo (siehe
+    .gitignore) oder sonst irgendwo geteilt werden."""
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
+    parser = configparser.ConfigParser()
+    if ACCOUNTS_CONFIG_PATH.exists():
+        parser.read(ACCOUNTS_CONFIG_PATH)
+    if name not in parser:
+        parser.add_section(name)
+    parser[name]["type"] = "onedrive"
+    parser[name]["region"] = "global"
+    parser[name]["token"] = token_json
+    parser[name]["drive_id"] = drive_id
+    parser[name]["drive_type"] = drive_type
+    for key, value in (extra_config or {}).items():
+        parser[name][key] = value
+    with open(ACCOUNTS_CONFIG_PATH, "w") as f:
+        parser.write(f)
+    try:
+        os.chmod(ACCOUNTS_CONFIG_PATH, 0o600)
+    except OSError:
+        pass
+
+
+def sync_account_token(account_name: str, remote_name: str, config_path: Path) -> None:
+    """Schreibt das (waehrend des Laufs von rclone ggf. automatisch erneuerte)
+    Token aus der temporaeren Lauf-Config zurueck in die dauerhafte
+    accounts.conf - manche OAuth-Provider machen Refresh-Tokens nach Gebrauch
+    ungueltig (rotating refresh tokens), ohne diesen Sync wuerde ein
+    gespeichertes Konto dann nur noch einmal funktionieren."""
+    if not account_name:
+        return
+    run_parser = configparser.ConfigParser()
+    run_parser.read(config_path)
+    if remote_name not in run_parser or "token" not in run_parser[remote_name]:
+        return
+    current_token = run_parser[remote_name]["token"]
+
+    accounts_parser = configparser.ConfigParser()
+    if ACCOUNTS_CONFIG_PATH.exists():
+        accounts_parser.read(ACCOUNTS_CONFIG_PATH)
+    if account_name not in accounts_parser:
+        return
+    accounts_parser[account_name]["token"] = current_token
+    with open(ACCOUNTS_CONFIG_PATH, "w") as f:
+        accounts_parser.write(f)
+    try:
+        os.chmod(ACCOUNTS_CONFIG_PATH, 0o600)
+    except OSError:
+        pass
+
+
+def prompt_account_choice(label: str) -> str | None:
+    """Zeigt gespeicherte Konten zur Auswahl plus 'neue Anmeldung'. Gibt den
+    Namen des gewaehlten gespeicherten Kontos zurueck, oder None fuer eine
+    neue Anmeldung."""
+    accounts = list_saved_accounts()
+    if not accounts:
+        return None
+
+    print(f"\n=== {label}: Konto waehlen ===")
+    for i, name in enumerate(accounts, start=1):
+        print(f"  {i}. {name}")
+    print(f"  {len(accounts) + 1}. Neue Anmeldung...")
+    while True:
+        raw = input(f"Auswahl (1-{len(accounts) + 1}): ").strip()
+        try:
+            idx = int(raw)
+        except ValueError:
+            print("Ungueltige Eingabe.")
+            continue
+        if 1 <= idx <= len(accounts):
+            return accounts[idx - 1]
+        if idx == len(accounts) + 1:
+            return None
+        print("Nummer ausserhalb des Bereichs.")
+
+
+def suggest_account_name(kind: str, drive_type: str, display_name: str) -> str:
+    if kind == "sharepoint":
+        return f"{display_name} (SharePoint)"
+    type_label = {"personal": "Personal", "business": "Business"}.get(drive_type, drive_type)
+    return f"{display_name} ({type_label})"
+
+
+def prompt_and_save_account(suggested_name: str, token_json: str, drive_id: str, drive_type: str, extra_config: dict[str, str] | None = None) -> str | None:
+    """Fragt, ob und unter welchem Namen ein neu angemeldetes Konto dauerhaft
+    gespeichert werden soll. Gibt den gespeicherten Namen zurueck, oder None
+    falls nicht gespeichert wurde (Konto funktioniert fuer diesen Lauf trotzdem
+    normal, wird aber beim naechsten Start nicht zur Auswahl stehen)."""
+    raw = input(f"Konto dauerhaft speichern als (Enter fuer '{suggested_name}', 'nein' zum Nicht-Speichern): ").strip()
+    if raw.lower() in ("nein", "no", "n"):
+        return None
+    name = raw or suggested_name
+    save_account(name, token_json, drive_id, drive_type, extra_config)
+    print(f"Konto gespeichert als '{name}'.")
+    return name
 
 
 def rclone_authorize_onedrive(env: dict, label: str) -> str:
@@ -387,10 +548,27 @@ def prompt_endpoint_type(label: str) -> str:
 
 
 def resolve_endpoint(env: dict, label: str, ca_cert_bundle: str | None, config_path: Path) -> dict:
-    """Fragt interaktiv ab, ob dieser Endpunkt (Quelle/Ziel) ein OneDrive-Account
-    oder eine SharePoint-Site ist, fuehrt den passenden Login durch und liefert
-    Token/Drive-ID/-Typ plus einen menschenlesbaren Bezeichner fuer die
-    Zusammenfassung zurueck."""
+    """Fragt zuerst, ob ein gespeichertes Konto verwendet werden soll; sonst
+    fragt sie ab, ob dieser Endpunkt ein OneDrive-Account oder eine
+    SharePoint-Site ist, fuehrt den passenden Login durch und bietet an, das
+    neue Konto dauerhaft zu speichern. Liefert immer Token/Drive-ID/-Typ plus
+    einen menschenlesbaren Bezeichner und (falls gespeichert) den Kontonamen
+    zurueck."""
+    chosen = prompt_account_choice(label)
+    if chosen is not None:
+        account = load_saved_account(chosen)
+        drive_type = account.get("drive_type", "")
+        kind = "sharepoint" if drive_type == "documentLibrary" else "onedrive"
+        print(f"Verwende gespeichertes Konto: {chosen}")
+        return {
+            "token": account["token"],
+            "drive_id": account["drive_id"],
+            "drive_type": drive_type,
+            "kind": kind,
+            "identity": chosen,
+            "account_name": chosen,
+        }
+
     endpoint_type = prompt_endpoint_type(label)
     type_label = "OneDrive" if endpoint_type == "onedrive" else "SharePoint"
     token = rclone_authorize_onedrive(env, f"{label} ({type_label})")
@@ -399,12 +577,19 @@ def resolve_endpoint(env: dict, label: str, ca_cert_bundle: str | None, config_p
         if endpoint_type == "onedrive":
             drive_id, drive_type, identity = fetch_own_drive(token, ca_cert_bundle)
             print(f"Gefundene Drive-ID: {drive_id} (Typ: {drive_type})")
+            display_name = identity.split("<")[0].strip()
+            suggested_name = suggest_account_name("onedrive", drive_type, display_name)
+            account_name = prompt_and_save_account(
+                suggested_name, token, drive_id, drive_type,
+                extra_config={"disable_site_permission": "true"},
+            )
             return {
                 "token": token,
                 "drive_id": drive_id,
                 "drive_type": drive_type,
                 "kind": "onedrive",
                 "identity": f"OneDrive ({identity})",
+                "account_name": account_name,
             }
 
         site = prompt_site_selection(token, ca_cert_bundle)
@@ -414,12 +599,15 @@ def resolve_endpoint(env: dict, label: str, ca_cert_bundle: str | None, config_p
         drive_id = drive["id"]
         drive_type = drive.get("driveType", "documentLibrary")
         print(f"Gefundene Dokumentbibliothek-Drive-ID: {drive_id} (Typ: {drive_type})")
+        suggested_name = suggest_account_name("sharepoint", drive_type, site_name)
+        account_name = prompt_and_save_account(suggested_name, token, drive_id, drive_type)
         return {
             "token": token,
             "drive_id": drive_id,
             "drive_type": drive_type,
             "kind": "sharepoint",
             "identity": f"SharePoint-Site '{site_name}' ({site.get('webUrl', '')})",
+            "account_name": account_name,
         }
     except (urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
         print(f"\nKonnte {label} nicht ueber Microsoft Graph aufloesen: {exc}")
@@ -511,60 +699,11 @@ def run_copy_with_retry(
     return exit_code
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Kopiert Daten zwischen OneDrive-Accounts und/oder SharePoint-Sites via rclone"
-    )
-    parser.add_argument(
-        "--ca-cert-bundle",
-        default=None,
-        help="Pfad zum CA-Bundle (PEM) eines TLS-inspizierenden Firmen-Proxys/Firewall (z.B. Cato, Zscaler), falls keine Bypass-Regel fuer die MS-Login/Graph/SharePoint-Domains existiert.",
-    )
-    parser.add_argument("--transfers", type=int, default=TRANSFERS)
-    parser.add_argument("--checkers", type=int, default=CHECKERS)
-    args = parser.parse_args()
+# ============================================================
+# Werkzeug 1: Kopieren/Migrieren
+# ============================================================
 
-    work_dir = Path.home() / "Claude" / "OneDriveCopy"
-    log_dir = Path("C:/Logs") if platform.system() == "Windows" else Path.home() / "Logs"
-    work_dir.mkdir(parents=True, exist_ok=True)
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    # Config-Datei je Lauf eindeutig benennen (Timestamp + PID): ein fester,
-    # gemeinsamer Pfad wuerde bei zwei gleichzeitig laufenden Aufrufen (z.B. weil
-    # ein vorheriger Lauf noch nicht fertig ist) sich gegenseitig ueberschreiben.
-    config_path = work_dir / f"rclone_{timestamp}_{os.getpid()}.conf"
-    log_file = log_dir / f"copy_{timestamp}.log"
-
-    if not find_rclone():
-        install_rclone()
-
-    env = os.environ.copy()
-    env["RCLONE_CONFIG"] = str(config_path)
-
-    if args.ca_cert_bundle:
-        env["RCLONE_CA_CERT"] = args.ca_cert_bundle
-
-    # Alle Parameter zuerst anzeigen, bevor die interaktiven Abfragen (Quelle/
-    # Ziel/Umfang) beginnen - damit von Anfang an klar ist, mit welcher
-    # Konfiguration dieser Lauf tatsaechlich arbeitet.
-    print("\n=== Parameter ===")
-    print(f"CA-Cert-Bundle: {args.ca_cert_bundle or 'keiner (bei TLS-Inspection durch einen Firmen-Proxy/Firewall ggf. noetig)'}")
-    print(f"Transfers: {args.transfers}")
-    print(f"Checkers: {args.checkers}")
-    rclone_display = "im Programm eingebettet" if RCLONE_BIN != "rclone" else find_rclone()
-    print(f"rclone: {rclone_display}")
-    print(f"Config-Verzeichnis: {work_dir}")
-    print(f"Log-Verzeichnis: {log_dir}")
-    print(f"Log-Datei (dieser Lauf): {log_file}")
-    if not args.ca_cert_bundle:
-        print(
-            "Hinweis: Falls TLS-Inspection durch einen Firmen-Proxy/Firewall (z.B. Cato, "
-            "Zscaler) greift: entweder --ca-cert-bundle setzen oder Bypass fuer "
-            "login.microsoftonline.com / login.live.com / graph.microsoft.com / "
-            "*.onedrive.com / *.sharepoint.com einrichten."
-        )
-
+def run_copy_tool(args, env: dict, config_path: Path, log_file: Path) -> int:
     # --- Quelle ---
     source_info = resolve_endpoint(env, "Quelle", args.ca_cert_bundle, config_path)
     source_exit = create_onedrive_remote(
@@ -574,7 +713,7 @@ def main() -> None:
     if source_exit != 0:
         print(f"\nConfig fuer Quelle fehlgeschlagen (Exit Code {source_exit}).")
         config_path.unlink(missing_ok=True)
-        sys.exit(source_exit)
+        return source_exit
 
     print("\nErmittle Inhalt der Quelle...")
     try:
@@ -582,7 +721,7 @@ def main() -> None:
     except (urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
         print(f"\nKonnte Ordnerliste nicht ermitteln: {exc}")
         config_path.unlink(missing_ok=True)
-        sys.exit(1)
+        return 1
 
     # --- Umfang: gesamter Inhalt oder ausgewaehlte Ordner ---
     print("\n=== Umfang ===")
@@ -626,7 +765,7 @@ def main() -> None:
     if target_exit != 0:
         print(f"\nConfig fuer Ziel fehlgeschlagen (Exit Code {target_exit}).")
         config_path.unlink(missing_ok=True)
-        sys.exit(target_exit)
+        return target_exit
 
     target_subfolder = input("\nZiel-Unterordner (leer = Root des Ziels): ").strip().strip("/")
 
@@ -676,7 +815,7 @@ def main() -> None:
     if connectivity_exit != 0:
         print(f"\nKonnte Ziel nicht auflisten (Exit Code {connectivity_exit}) - Abbruch.")
         config_path.unlink(missing_ok=True)
-        sys.exit(connectivity_exit)
+        return connectivity_exit
 
     # --- Zusammenfassung, direkt vor dem eigentlichen Kopieren ---
     print("\n=== Zusammenfassung ===")
@@ -737,8 +876,13 @@ def main() -> None:
         print(f"\nMindestens ein Kopiervorgang blieb fehlerhaft. Details im Log: {log_file}")
         print("Script erneut starten - rclone kopiert nur das nach, was noch fehlt.")
 
+    if source_info.get("account_name"):
+        sync_account_token(source_info["account_name"], "source", config_path)
+    if target_info.get("account_name"):
+        sync_account_token(target_info["account_name"], "target", config_path)
+
     config_path.unlink(missing_ok=True)
-    print("\nrclone.conf mit Zugangsdaten geloescht - naechster Lauf erfordert wieder interaktiven Login.")
+    print("\nrclone.conf (Lauf-Config) geloescht - dauerhaft gespeicherte Konten bleiben in accounts.conf erhalten.")
 
     error_file, error_count = extract_error_lines(log_file)
     print(f"\nLog-Datei: {log_file}")
@@ -747,7 +891,335 @@ def main() -> None:
     if error_count:
         open_in_viewer(error_file)
 
-    sys.exit(overall_copy_exit)
+    return overall_copy_exit
+
+
+# ============================================================
+# Werkzeug 2: Duplikate finden
+# ============================================================
+
+def primary_hash(record: dict) -> str | None:
+    """Waehlt einen Hash-Typ als Vergleichsbasis. quickxor ist OneDrives
+    nativer Hash-Typ und wird bevorzugt; als Fallback wird irgendein anderer
+    vom Backend gelieferter Hash-Typ verwendet (falls quickxor fehlt)."""
+    hashes = record.get("Hashes") or {}
+    if "quickxor" in hashes:
+        return hashes["quickxor"]
+    for value in hashes.values():
+        return value
+    return None
+
+
+def _dedupe_row(category: str, group_id: int, f: dict) -> dict:
+    return {
+        "Kategorie": category,
+        "Gruppe": group_id,
+        "Hash": f["_hash"],
+        "Dateiname": f["Name"],
+        "Pfad": f["Path"],
+        "Groesse": f.get("Size", ""),
+        "Letzte_Aenderung": f.get("ModTime", ""),
+    }
+
+
+def build_report_rows(files: list[dict]) -> list[dict]:
+    """Baut die drei Kategorien aus den Datei-Eintraegen. Eine Datei kann in
+    mehreren Kategorien auftauchen (z.B. Teil eines sicheren Duplikat-Paars
+    UND Teil einer Namenskollision mit einer dritten Datei) - das sind
+    unterschiedliche, sich nicht ausschliessende Fragen an die Daten, kein
+    striktes Partitionieren."""
+    by_name = defaultdict(list)
+    by_hash = defaultdict(list)
+    by_name_hash = defaultdict(list)
+    skipped_no_hash = 0
+
+    for f in files:
+        h = primary_hash(f)
+        if h is None:
+            skipped_no_hash += 1
+            continue
+        f["_hash"] = h
+        by_name[f["Name"]].append(f)
+        by_hash[h].append(f)
+        by_name_hash[(f["Name"], h)].append(f)
+
+    if skipped_no_hash:
+        print(f"Hinweis: {skipped_no_hash} Datei(en) ohne Hash vom Backend uebersprungen (kann nicht sicher verglichen werden).")
+
+    rows: list[dict] = []
+    group_id = 0
+
+    for group in by_name_hash.values():
+        if len(group) < 2:
+            continue
+        group_id += 1
+        rows += [_dedupe_row("1_sicheres_duplikat", group_id, f) for f in group]
+
+    for group in by_name.values():
+        if len({f["_hash"] for f in group}) < 2:
+            continue
+        group_id += 1
+        rows += [_dedupe_row("2_nur_name_gleich", group_id, f) for f in group]
+
+    for group in by_hash.values():
+        if len({f["Name"] for f in group}) < 2:
+            continue
+        group_id += 1
+        rows += [_dedupe_row("3_nur_hash_gleich", group_id, f) for f in group]
+
+    return rows
+
+
+def write_dedupe_csv(rows: list[dict], output_path: str) -> None:
+    fieldnames = ["Kategorie", "Gruppe", "Hash", "Dateiname", "Pfad", "Groesse", "Letzte_Aenderung"]
+    # utf-8-sig: Excel unter Windows zeigt Umlaute ohne BOM sonst falsch an.
+    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def join_remote_path(remote: str, path: str) -> str:
+    """Haengt einen relativen Pfad korrekt an ein rclone-Remote an, egal ob
+    das Remote als 'name:' (bloss Doppelpunkt) oder 'name:Unterordner' (schon
+    mit Pfad) angegeben wurde."""
+    if remote.endswith(":"):
+        return f"{remote}{path}"
+    return f"{remote.rstrip('/')}/{path}"
+
+
+def parse_modtime(value: str) -> datetime.datetime:
+    """Parst rclones ModTime-Format (ISO 8601, oft mit Nanosekunden-Praezision,
+    die Pythons fromisoformat nicht mag) robust - Bruchteil auf 6 Stellen
+    (Mikrosekunden) kappen."""
+    if "." in value:
+        head, rest = value.split(".", 1)
+        frac_digits = 0
+        for ch in rest:
+            if ch.isdigit():
+                frac_digits += 1
+            else:
+                break
+        frac, tz = rest[:frac_digits], rest[frac_digits:]
+        value = f"{head}.{frac[:6]}{tz}"
+    return datetime.datetime.fromisoformat(value)
+
+
+def human_size(num_bytes: float) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(num_bytes) < 1024:
+            return f"{num_bytes:.1f} {unit}"
+        num_bytes /= 1024
+    return f"{num_bytes:.1f} PiB"
+
+
+def read_report_csv(path: str) -> list[dict]:
+    with open(path, "r", newline="", encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
+def plan_deletions(rows: list[dict]) -> list[dict]:
+    """Gruppiert Kategorie-1-Zeilen nach 'Gruppe', behaelt pro Gruppe die
+    Kopie mit dem fruehesten Aenderungsdatum und schlaegt alle anderen zum
+    Loeschen vor."""
+    groups = defaultdict(list)
+    for row in rows:
+        if row["Kategorie"] != "1_sicheres_duplikat":
+            continue
+        groups[row["Gruppe"]].append(row)
+
+    to_delete: list[dict] = []
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        try:
+            group_sorted = sorted(group, key=lambda r: parse_modtime(r["Letzte_Aenderung"]))
+        except ValueError:
+            # Unparsbares Datum - sicherheitshalber diese Gruppe ueberspringen
+            # statt zu raten, welche Kopie die "aelteste" ist.
+            continue
+        to_delete += group_sorted[1:]
+    return to_delete
+
+
+def run_delete_workflow(remote: str, csv_path: str, env: dict) -> None:
+    rows = read_report_csv(csv_path)
+    planned = plan_deletions(rows)
+
+    if not planned:
+        print("Keine loeschbaren sicheren Duplikate im Report gefunden.")
+        return
+
+    total_size = sum(int(r["Groesse"] or 0) for r in planned)
+    print(f"\n{len(planned)} Datei(en) zum Loeschen vorgemerkt ({human_size(total_size)} werden frei):\n")
+    for r in planned:
+        print(f"  LOESCHEN: {r['Pfad']}  ({human_size(int(r['Groesse'] or 0))}, {r['Letzte_Aenderung']})")
+
+    answer = input(f"\n{len(planned)} Datei(en) wirklich loeschen? Tippe 'loeschen' zum Bestaetigen: ").strip()
+    if answer.lower() != "loeschen":
+        print("Abgebrochen - nichts geloescht.")
+        return
+
+    log_path = Path(csv_path).with_name(Path(csv_path).stem + "_geloescht.log")
+    deleted, failed = 0, 0
+    with open(log_path, "w", encoding="utf-8") as log:
+        for r in planned:
+            target = join_remote_path(remote, r["Pfad"])
+            print(f"Loesche: {target}")
+            result = subprocess.run([RCLONE_BIN, "deletefile", target], env=env, capture_output=True, text=True)
+            if result.returncode == 0:
+                deleted += 1
+                log.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S} GELOESCHT: {target}\n")
+            else:
+                failed += 1
+                print(f"  FEHLER: {result.stderr.strip()}")
+                log.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S} FEHLER bei {target}: {result.stderr.strip()}\n")
+
+    print(f"\n{deleted} Datei(en) geloescht, {failed} Fehler. Protokoll: {log_path}")
+
+
+def list_files_for_dedupe(remote: str, env: dict, excludes: list[str]) -> list[dict] | None:
+    """Ruft 'rclone lsjson' rekursiv mit Hash-Angabe ab und gibt die
+    geparsten Datei-Eintraege zurueck (Ordner werden per --files-only
+    weggelassen). Gibt None bei Fehler zurueck (Aufrufer entscheidet ueber
+    Abbruch)."""
+    cmd = [RCLONE_BIN, "lsjson", remote, "-R", "--files-only", "--hash"]
+    for pattern in excludes:
+        cmd += ["--exclude", pattern]
+
+    print(f"Frage '{remote}' ab (rclone lsjson -R --hash) - bei grossen Strukturen kann das einen Moment dauern...")
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"rclone lsjson fehlgeschlagen (Exit Code {result.returncode}):\n{result.stderr}")
+        return None
+    return json.loads(result.stdout)
+
+
+def run_dedupe_tool(args, env: dict, config_path: Path, timestamp: str) -> int:
+    scan_info = resolve_endpoint(env, "Zu durchsuchendes Konto", args.ca_cert_bundle, config_path)
+    scan_exit = create_onedrive_remote(
+        "scan", scan_info["token"], scan_info["drive_id"], scan_info["drive_type"], config_path, env,
+        extra_config={"disable_site_permission": "true"} if scan_info["kind"] == "onedrive" else None,
+    )
+    if scan_exit != 0:
+        print(f"\nConfig fehlgeschlagen (Exit Code {scan_exit}).")
+        config_path.unlink(missing_ok=True)
+        return scan_exit
+
+    default_output = str(WORK_DIR / f"dedupe_report_{timestamp}.csv")
+    output_path = input(f"\nCSV-Ausgabepfad (Enter fuer '{default_output}'): ").strip() or default_output
+    raw_exclude = input("Auszuschliessende Muster, kommagetrennt (Enter fuer keine, z.B. '_Archiv/**'): ").strip()
+    excludes = [p.strip() for p in raw_exclude.split(",") if p.strip()] if raw_exclude else []
+
+    files = list_files_for_dedupe("scan:", env, excludes)
+    if files is None:
+        config_path.unlink(missing_ok=True)
+        return 1
+    print(f"{len(files)} Dateien gefunden.")
+
+    rows = build_report_rows(files)
+    write_dedupe_csv(rows, output_path)
+
+    groups_by_category: dict[str, set[int]] = defaultdict(set)
+    files_by_category: dict[str, int] = defaultdict(int)
+    for row in rows:
+        groups_by_category[row["Kategorie"]].add(row["Gruppe"])
+        files_by_category[row["Kategorie"]] += 1
+
+    print(f"\nReport geschrieben nach: {output_path}")
+    for category, label in [
+        ("1_sicheres_duplikat", "Sichere Duplikate"),
+        ("2_nur_name_gleich", "Nur Name gleich"),
+        ("3_nur_hash_gleich", "Nur Hash gleich"),
+    ]:
+        print(f"  {label}: {len(groups_by_category[category])} Gruppen ({files_by_category[category]} Dateien)")
+
+    if scan_info.get("account_name"):
+        sync_account_token(scan_info["account_name"], "scan", config_path)
+
+    if files_by_category["1_sicheres_duplikat"]:
+        answer = input(
+            "\nSichere Duplikate jetzt pruefen und optional loeschen? "
+            "(Empfehlung: erst die CSV in Excel ansehen) (j/n): "
+        ).strip().lower()
+        if answer == "j":
+            run_delete_workflow("scan:", output_path, env)
+
+    config_path.unlink(missing_ok=True)
+    print("\nrclone.conf (Lauf-Config) geloescht - dauerhaft gespeicherte Konten bleiben in accounts.conf erhalten.")
+    open_in_viewer(output_path)
+    return 0
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Kopiert Daten zwischen OneDrive-Accounts und/oder SharePoint-Sites via rclone, oder findet Duplikate."
+    )
+    parser.add_argument(
+        "--ca-cert-bundle",
+        default=None,
+        help="Pfad zum CA-Bundle (PEM) eines TLS-inspizierenden Firmen-Proxys/Firewall (z.B. Cato, Zscaler), falls keine Bypass-Regel fuer die MS-Login/Graph/SharePoint-Domains existiert.",
+    )
+    parser.add_argument("--transfers", type=int, default=TRANSFERS)
+    parser.add_argument("--checkers", type=int, default=CHECKERS)
+    args = parser.parse_args()
+
+    log_dir = Path("C:/Logs") if platform.system() == "Windows" else Path.home() / "Logs"
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Config-Datei je Lauf eindeutig benennen (Timestamp + PID): ein fester,
+    # gemeinsamer Pfad wuerde bei zwei gleichzeitig laufenden Aufrufen (z.B. weil
+    # ein vorheriger Lauf noch nicht fertig ist) sich gegenseitig ueberschreiben.
+    config_path = WORK_DIR / f"rclone_{timestamp}_{os.getpid()}.conf"
+    log_file = log_dir / f"copy_{timestamp}.log"
+
+    if not find_rclone():
+        install_rclone()
+
+    env = os.environ.copy()
+    env["RCLONE_CONFIG"] = str(config_path)
+
+    if args.ca_cert_bundle:
+        env["RCLONE_CA_CERT"] = args.ca_cert_bundle
+
+    # Alle Parameter zuerst anzeigen, bevor die interaktiven Abfragen beginnen -
+    # damit von Anfang an klar ist, mit welcher Konfiguration dieser Lauf
+    # tatsaechlich arbeitet.
+    print("\n=== Parameter ===")
+    print(f"CA-Cert-Bundle: {args.ca_cert_bundle or 'keiner (bei TLS-Inspection durch einen Firmen-Proxy/Firewall ggf. noetig)'}")
+    print(f"Transfers: {args.transfers}")
+    print(f"Checkers: {args.checkers}")
+    rclone_display = "im Programm eingebettet" if RCLONE_BIN != "rclone" else find_rclone()
+    print(f"rclone: {rclone_display}")
+    print(f"Arbeitsverzeichnis: {WORK_DIR}")
+    print(f"Gespeicherte Konten: {ACCOUNTS_CONFIG_PATH}")
+    print(f"Log-Verzeichnis: {log_dir}")
+    print(f"Log-Datei (dieser Lauf): {log_file}")
+    if not args.ca_cert_bundle:
+        print(
+            "Hinweis: Falls TLS-Inspection durch einen Firmen-Proxy/Firewall (z.B. Cato, "
+            "Zscaler) greift: entweder --ca-cert-bundle setzen oder Bypass fuer "
+            "login.microsoftonline.com / login.live.com / graph.microsoft.com / "
+            "*.onedrive.com / *.sharepoint.com einrichten."
+        )
+
+    print("\n=== Was moechtest du tun? ===")
+    print("  1. Kopieren/Migrieren (OneDrive/SharePoint)")
+    print("  2. Duplikate finden")
+    while True:
+        tool_choice = input("Auswahl (1/2): ").strip()
+        if tool_choice in ("1", "2"):
+            break
+        print("Ungueltige Eingabe - bitte 1 oder 2 eingeben.")
+
+    if tool_choice == "1":
+        exit_code = run_copy_tool(args, env, config_path, log_file)
+    else:
+        exit_code = run_dedupe_tool(args, env, config_path, timestamp)
+
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

@@ -31,7 +31,9 @@ Schritte auf einem Windows-Rechner:
    Falls "python" ebenfalls nicht gefunden wird, stattdessen "py -m PyInstaller ...".
 
    Ergebnis liegt danach in: dist\onedrive-sharepoint-migration-tool.exe
-   (einzelne Datei, Python + rclone bereits eingebettet, ca. 30-40 MB)
+   (einzelne Datei, Python + rclone bereits eingebettet, enthaelt BEIDE
+   Werkzeuge - Kopieren/Migrieren UND Duplikate finden, ueber ein Menue beim
+   Start auswaehlbar - ca. 30-40 MB)
 
 5. dist\onedrive-sharepoint-migration-tool.exe in den gewuenschten Zielordner
    kopieren (gleicher Ordner wie onedrive-sharepoint-migration-tool.bat).
@@ -45,20 +47,3 @@ von Windows SmartScreen beim ersten Start oft als "unbekannter Herausgeber"
 gemeldet. Ueber "Weitere Informationen" -> "Trotzdem ausfuehren" bestaetigen.
 Das laesst sich nur durch ein kostenpflichtiges Code-Signing-Zertifikat
 vermeiden - fuer ein persoenliches Tool in der Regel nicht notwendig.
-
-
-Zweites Tool: onedrive_dedupe_report (Duplikat-Finder)
-======================================================================
-
-Gleiches Vorgehen wie oben, nur mit anderem Skriptnamen (Schritte 1-3 identisch,
-gleicher rclone.exe-Ordner kann wiederverwendet werden):
-
-     python -m PyInstaller --onefile --console --name onedrive_dedupe_report --add-binary "rclone.exe;." onedrive_dedupe_report.py
-
-Ergebnis: dist\onedrive_dedupe_report.exe (Python + rclone eingebettet).
-
-Dieses Tool braucht immer Parameter (--remote, --output, ...) und ist daher
-bewusst ohne Doppelklick-Starter/.bat gedacht - einfach direkt aus einer
-Konsole aufrufen:
-
-     onedrive_dedupe_report.exe --remote onedrive: --output report.csv

@@ -1,8 +1,12 @@
 # OneDrive/SharePoint Migration Tool
 
-A small interactive command-line tool that copies files between OneDrive accounts
-and/or SharePoint sites using [rclone](https://rclone.org/), without relying on
-rclone's built-in drive-discovery (which fails for OneDrive Personal accounts).
+A small interactive command-line tool for two related tasks around
+[rclone](https://rclone.org/) and OneDrive/SharePoint, without relying on
+rclone's built-in drive-discovery (which fails for OneDrive Personal
+accounts):
+
+1. **Copy/migrate** files between OneDrive accounts and/or SharePoint sites
+2. **Find duplicates** across the entire tree of a single account
 
 > Note: the interactive prompts and log messages are currently in **German**
 > (the tool was originally written for personal/family use). The logic itself
@@ -10,19 +14,44 @@ rclone's built-in drive-discovery (which fails for OneDrive Personal accounts).
 
 ## What it does
 
-At startup you're asked, independently for source and target:
+At startup you choose which of the two tools to use. Each login (source,
+target, or the account to scan for duplicates) first offers any **previously
+saved accounts** to pick from — no need to log in again, rclone refreshes the
+token automatically in the background — or the option to log in fresh. After
+a fresh login you can optionally save the account under a name (e.g. `Jane
+Doe (Personal)`) so it shows up next time. Saved accounts live in
+`accounts.conf` next to the script (see [Logs & data](#logs--data) below) and
+are never committed to this repository.
+
+### Tool 1: Copy/migrate
+
+Source and target are asked independently, so any combination works:
 
 ```
-OneDrive     -> OneDrive
-OneDrive     -> SharePoint site
+OneDrive        -> OneDrive
+OneDrive        -> SharePoint site
 SharePoint site -> OneDrive
 SharePoint site -> SharePoint site
 ```
 
-Then whether to copy the entire drive or only selected folders, and into which
-target subfolder. It shows a summary (source, target, scope, exclusions,
-planned copy operations) before anything is copied, retries failed files
-automatically, and opens the log (plus an extracted error log) when done.
+Then whether to copy the entire drive or only selected folders, and into
+which target subfolder. It shows a summary (source, target, scope,
+exclusions, planned copy operations) before anything is copied, retries
+failed files automatically, and opens the log (plus an extracted error log)
+when done.
+
+### Tool 2: Find duplicates
+
+Scans an account (saved or freshly logged into) with `rclone lsjson -R
+--hash` and writes a CSV report classifying files into:
+
+- **1_sicheres_duplikat** — same name *and* same hash (safe to dedupe)
+- **2_nur_name_gleich** — same filename, different content (needs a manual look)
+- **3_nur_hash_gleich** — identical content, different filename (renamed copy)
+
+Afterwards it can optionally delete the safe duplicates (category 1, oldest
+copy per group kept) — always with an explicit confirmation, never
+automatically.
 
 ### Why not just use rclone directly?
 
@@ -36,11 +65,14 @@ automatically, and opens the log (plus an extracted error log) when done.
 - Folders that are actually shortcuts to **someone else's** OneDrive (e.g. via
   "Add shortcut to My files") are detected and clearly marked, so you don't
   accidentally copy content that isn't yours.
-- SharePoint modifies certain Office file types (`.docx`/`.xlsx`/...) shortly
-  after upload (embedded compatibility metadata), which changes their size and
-  hash. Plain rclone misreads this as transfer corruption and deletes the
-  (actually fine) uploaded file. This tool passes `--ignore-size
-  --ignore-checksum` specifically for SharePoint targets to avoid that.
+- SharePoint — and OneDrive **for Business**, which runs on the same backend —
+  modifies certain Office file types (`.docx`/`.xlsx`/...) shortly after
+  upload (embedded compatibility metadata), which changes their size and
+  hash. Plain rclone misreads this as transfer corruption, deletes the
+  (actually fine) uploaded file, and re-uploads it as a new version on every
+  run — silently bloating OneDrive's version history storage over repeated
+  runs. This tool passes `--ignore-size --ignore-checksum` for SharePoint and
+  OneDrive-Business targets to avoid both problems.
 
 ## Requirements
 
@@ -90,35 +122,15 @@ See [BUILD_WINDOWS.txt](BUILD_WINDOWS.txt) for detailed step-by-step Windows
 build instructions. PyInstaller can only build for the OS it runs on, so the
 Windows executable must be built on Windows.
 
-## Logs
+## Logs & data
 
-Logs are written to `~/Logs` on macOS/Linux and `C:\Logs` on Windows.
-`rclone.conf` working files (never containing long-lived credentials — deleted
-at the end of each run) live under `~/Claude/OneDriveCopy`.
-
-## Bonus: duplicate finder (`onedrive_dedupe_report.py`)
-
-A second, standalone script that scans an **existing** rclone remote (one you
-already set up yourself, e.g. via `rclone config` — it doesn't do its own
-login like the tool above) and reports duplicates across the *entire* tree,
-not just within one folder like `rclone dedupe`:
-
-```
-python3 onedrive_dedupe_report.py --remote onedrive: --output report.csv
-python3 onedrive_dedupe_report.py --remote onedrive:Folder --output report.csv --ca-cert-bundle /path/to/bundle.pem
-python3 onedrive_dedupe_report.py --remote onedrive: --output report.csv --exclude "_Archive/**"
-```
-
-It runs `rclone lsjson -R --hash` once, then classifies files into a single
-CSV (one row per file, a `Gruppe` column ties related rows together):
-
-- **1_sicheres_duplikat** — same name *and* same hash (safe to dedupe)
-- **2_nur_name_gleich** — same filename, different content (needs a manual look)
-- **3_nur_hash_gleich** — identical content, different filename (renamed copy)
-
-Can be packaged the same way as the main tool (`--name onedrive_dedupe_report`).
-It always needs `--remote`/`--output`, so unlike the main tool it's meant to
-be run from a terminal rather than double-clicked.
+- Run logs are written to `~/Logs` on macOS/Linux and `C:\Logs` on Windows.
+- Everything else (temporary per-run `rclone_*.conf` files, deleted again at
+  the end of each run, the persistent `accounts.conf`, and duplicate-finder
+  CSV reports) lives under `~/Claude/onedrive-sharepoint-migration-tool`.
+- `accounts.conf` contains long-lived OAuth tokens for every saved account —
+  treat it like a password file. It's created with owner-only file
+  permissions and is excluded from this repository via `.gitignore`.
 
 ## License
 

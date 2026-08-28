@@ -3,5 +3,13 @@ dist/
 *.spec
 __pycache__/
 *.pyc
-OneDrive_Copy
-OneDrive_Copy.exe
+.DS_Store
+accounts.conf
+rclone.conf
+rclone_*.conf
+logs/
+onedrive-sharepoint-migration-tool
+onedrive-sharepoint-migration-tool.exe
+onedrive-sharepoint-migration-tool.app/
+onedrive_dedupe_report
+onedrive_dedupe_report.exe
