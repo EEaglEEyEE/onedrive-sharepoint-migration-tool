@@ -96,6 +96,30 @@ Logs are written to `~/Logs` on macOS/Linux and `C:\Logs` on Windows.
 `rclone.conf` working files (never containing long-lived credentials — deleted
 at the end of each run) live under `~/Claude/OneDriveCopy`.
 
+## Bonus: duplicate finder (`onedrive_dedupe_report.py`)
+
+A second, standalone script that scans an **existing** rclone remote (one you
+already set up yourself, e.g. via `rclone config` — it doesn't do its own
+login like the tool above) and reports duplicates across the *entire* tree,
+not just within one folder like `rclone dedupe`:
+
+```
+python3 onedrive_dedupe_report.py --remote onedrive: --output report.csv
+python3 onedrive_dedupe_report.py --remote onedrive:Folder --output report.csv --ca-cert-bundle /path/to/bundle.pem
+python3 onedrive_dedupe_report.py --remote onedrive: --output report.csv --exclude "_Archive/**"
+```
+
+It runs `rclone lsjson -R --hash` once, then classifies files into a single
+CSV (one row per file, a `Gruppe` column ties related rows together):
+
+- **1_sicheres_duplikat** — same name *and* same hash (safe to dedupe)
+- **2_nur_name_gleich** — same filename, different content (needs a manual look)
+- **3_nur_hash_gleich** — identical content, different filename (renamed copy)
+
+Can be packaged the same way as the main tool (`--name onedrive_dedupe_report`).
+It always needs `--remote`/`--output`, so unlike the main tool it's meant to
+be run from a terminal rather than double-clicked.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

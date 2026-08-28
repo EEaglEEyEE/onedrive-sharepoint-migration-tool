@@ -655,11 +655,20 @@ def main() -> None:
     # hashes differ") und LOESCHT die gerade hochgeladene (tatsaechlich
     # intakte) Datei wieder - und wiederholt das bei jedem Retry erneut, weil
     # SharePoint die Datei bei jedem erneuten Versuch wieder anders veraendert
-    # (nie identisch zur Quelle). --ignore-size/--ignore-checksum sind hier
-    # absichtlich gesetzt, um diesen bekannten SharePoint-Effekt nicht mit
-    # echter Uebertragungskorruption zu verwechseln.
+    # (nie identisch zur Quelle). OneDrive FOR BUSINESS laeuft auf derselben
+    # SharePoint-Backend-Infrastruktur und zeigt denselben Effekt: ein Log vom
+    # 2026-08-26 zeigte bei einem erneuten "gesamter Inhalt"-Lauf gegen ein
+    # OneDrive-Business-Ziel 66.155 "replaced existing" bei 0 "new" (Ziel hatte
+    # schon alles) und 285 GiB neu hochgeladen, obwohl die Quelle nur ~120 GB
+    # hat - jeder erneute Upload landet dabei als NEUE VERSION in OneDrives
+    # Versionshistorie, ohne die alte zu ersetzen, was den Speicherverbrauch
+    # bei wiederholten Laeufen unbemerkt aufblaeht (120GB Inhalt -> 780GB
+    # belegter Speicher). --ignore-size/--ignore-checksum sind hier absichtlich
+    # gesetzt, um diesen Effekt nicht mit echter Uebertragungskorruption zu
+    # verwechseln UND um wiederholte, unnoetige Re-Uploads zu vermeiden.
+    needs_ignore_flags = target_info["kind"] == "sharepoint" or target_info.get("drive_type") == "business"
     copy_extra_args = list(exclude_args)
-    if target_info["kind"] == "sharepoint":
+    if needs_ignore_flags:
         copy_extra_args += ["--ignore-size", "--ignore-checksum"]
 
     print("\nVerbindung zum Ziel pruefen...")
@@ -677,11 +686,11 @@ def main() -> None:
         f"Umfang: {'gesamter Inhalt' if selected_folders is None else 'ausgewaehlte Ordner: ' + ', '.join(selected_folders)}",
         f"Exclusion: {', '.join(f'{n}/**' for n in exclude_names) if exclude_names else 'keine'}",
     ]
-    if target_info["kind"] == "sharepoint":
+    if needs_ignore_flags:
         summary_lines.append(
-            "Hinweis: Ziel ist SharePoint - Groessen- und Pruefsummenpruefung nach Upload "
-            "sind deaktiviert (--ignore-size, --ignore-checksum), da SharePoint Office-"
-            "Dateien serverseitig veraendert."
+            "Hinweis: Ziel ist SharePoint bzw. OneDrive Business - Groessen- und "
+            "Pruefsummenpruefung nach Upload sind deaktiviert (--ignore-size, "
+            "--ignore-checksum), da diese Backends Dateien serverseitig veraendern."
         )
     summary_lines.append("Geplante Kopiervorgaenge:")
     summary_lines += [f"  {src} -> {tgt}" for src, tgt in copy_pairs]
@@ -699,9 +708,10 @@ def main() -> None:
 
     if overall_copy_exit == 0:
         print("\n=== Verifikation (Pruefsummenvergleich) ===")
-        # --ignore-size auch hier, sonst meldet 'rclone check' fuer SharePoint-Ziele
-        # dieselben serverseitig verursachten Groessenabweichungen als Fehler.
-        check_extra_args = ["--ignore-size"] if target_info["kind"] == "sharepoint" else []
+        # --ignore-size auch hier, sonst meldet 'rclone check' fuer SharePoint-/
+        # OneDrive-Business-Ziele dieselben serverseitig verursachten
+        # Groessenabweichungen als Fehler.
+        check_extra_args = ["--ignore-size"] if needs_ignore_flags else []
         overall_check_exit = 0
         for src, tgt in copy_pairs:
             check_exit = run(
