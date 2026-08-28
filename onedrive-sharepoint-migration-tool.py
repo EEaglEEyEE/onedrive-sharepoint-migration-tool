@@ -18,6 +18,11 @@ gewuenscht - dauerhaft in accounts.conf gespeichert, damit es beim naechsten
 Start direkt ausgewaehlt werden kann. accounts.conf enthaelt langlebige
 Zugangsdaten und wird NIE ins Git-Repo committet (siehe .gitignore) und mit
 restriktiven Dateirechten (nur Besitzer) angelegt.
+Sollte ein gespeichertes Konto nicht mehr funktionieren (z.B. "HTTP Error
+401: Unauthorized", weil der Refresh-Token ungueltig geworden ist - etwa nach
+Passwortaenderung oder laengerer Inaktivitaet), steht bei der Kontoauswahl
+zusaetzlich "Bestehendes Konto neu anmelden" zur Verfuegung - das ersetzt nur
+das Token, Drive-ID/-Typ und der Name bleiben erhalten.
 
 --- Werkzeug 1: Kopieren/Migrieren ---
 Fragt Quelle UND Ziel unabhaengig voneinander ab (jeweils OneDrive oder
@@ -72,6 +77,12 @@ bleibt aussen vor) und erzeugt eine CSV mit drei Kategorien:
   1. Sichere Duplikate - gleicher Name UND gleicher Hash
   2. Nur Name gleich   - gleicher Dateiname, aber unterschiedlicher Inhalt
   3. Nur Hash gleich   - identischer Inhalt, aber unterschiedlicher Dateiname
+
+Jede Zeile hat zusaetzlich eine Spalte 'Konto_Share': entweder der Name des
+gescannten Kontos (eigener Speicher) oder - falls die Datei unterhalb einer
+Fremd-Share-Verknuepfung liegt - der Name dieser Verknuepfung, damit auf einen
+Blick erkennbar ist, ob ein Duplikat im eigenen Konto oder in einer
+verknuepften Freigabe liegt.
 
 Die CSV wird direkt nach dem Erstellen automatisch geoeffnet. Das Tool
 loescht selbst nichts - die CSV dient rein der Uebersicht, allfaellige
@@ -306,20 +317,30 @@ def sync_account_token(account_name: str, remote_name: str, config_path: Path) -
         pass
 
 
-def prompt_account_choice(label: str) -> str | None:
-    """Zeigt gespeicherte Konten zur Auswahl plus 'neue Anmeldung'. Gibt den
-    Namen des gewaehlten gespeicherten Kontos zurueck, oder None fuer eine
-    neue Anmeldung."""
-    accounts = list_saved_accounts()
-    if not accounts:
-        return None
+def reauthenticate_account(name: str, env: dict) -> None:
+    """Fuehrt fuer ein bereits gespeichertes Konto einen kompletten neuen
+    OAuth-Login durch und ersetzt NUR das Token (Drive-ID/-Typ/sonstige
+    Einstellungen bleiben unveraendert) - fuer den Fall, dass der
+    Refresh-Token ungueltig geworden ist (z.B. Passwortaenderung, Widerruf
+    durch einen Admin, laengere Inaktivitaet: 'HTTP Error 401: Unauthorized')."""
+    account = load_saved_account(name)
+    token = rclone_authorize_onedrive(env, f"Erneute Anmeldung: {name}")
+    extra_config = {
+        k: v for k, v in account.items()
+        if k not in ("type", "region", "token", "drive_id", "drive_type")
+    }
+    save_account(name, token, account["drive_id"], account["drive_type"], extra_config)
+    print(f"Konto '{name}' wurde neu angemeldet.")
 
-    print(f"\n=== {label}: Konto waehlen ===")
+
+def prompt_reauth_target(accounts: list[str]) -> str | None:
+    print("\nWelches Konto neu anmelden?")
     for i, name in enumerate(accounts, start=1):
         print(f"  {i}. {name}")
-    print(f"  {len(accounts) + 1}. Neue Anmeldung...")
+    cancel_idx = len(accounts) + 1
+    print(f"  {cancel_idx}. Abbrechen")
     while True:
-        raw = input(f"Auswahl (1-{len(accounts) + 1}): ").strip()
+        raw = input(f"Auswahl (1-{cancel_idx}): ").strip()
         try:
             idx = int(raw)
         except ValueError:
@@ -327,8 +348,43 @@ def prompt_account_choice(label: str) -> str | None:
             continue
         if 1 <= idx <= len(accounts):
             return accounts[idx - 1]
-        if idx == len(accounts) + 1:
+        if idx == cancel_idx:
             return None
+        print("Nummer ausserhalb des Bereichs.")
+
+
+def prompt_account_choice(label: str, env: dict) -> str | None:
+    """Zeigt gespeicherte Konten zur Auswahl plus 'neue Anmeldung' und
+    'bestehendes Konto neu anmelden' (falls z.B. der Refresh-Token
+    ungueltig geworden ist). Gibt den Namen des gewaehlten gespeicherten
+    Kontos zurueck, oder None fuer eine neue Anmeldung."""
+    while True:
+        accounts = list_saved_accounts()
+        if not accounts:
+            return None
+
+        print(f"\n=== {label}: Konto waehlen ===")
+        for i, name in enumerate(accounts, start=1):
+            print(f"  {i}. {name}")
+        new_login_idx = len(accounts) + 1
+        reauth_idx = len(accounts) + 2
+        print(f"  {new_login_idx}. Neue Anmeldung...")
+        print(f"  {reauth_idx}. Bestehendes Konto neu anmelden (falls Token abgelaufen/ungueltig)...")
+        raw = input(f"Auswahl (1-{reauth_idx}): ").strip()
+        try:
+            idx = int(raw)
+        except ValueError:
+            print("Ungueltige Eingabe.")
+            continue
+        if 1 <= idx <= len(accounts):
+            return accounts[idx - 1]
+        if idx == new_login_idx:
+            return None
+        if idx == reauth_idx:
+            target = prompt_reauth_target(accounts)
+            if target is not None:
+                reauthenticate_account(target, env)
+            continue
         print("Nummer ausserhalb des Bereichs.")
 
 
@@ -593,7 +649,7 @@ def resolve_endpoint(env: dict, label: str, ca_cert_bundle: str | None, config_p
     neue Konto dauerhaft zu speichern. Liefert immer Token/Drive-ID/-Typ plus
     einen menschenlesbaren Bezeichner und (falls gespeichert) den Kontonamen
     zurueck."""
-    chosen = prompt_account_choice(label)
+    chosen = prompt_account_choice(label, env)
     if chosen is not None:
         account = load_saved_account(chosen)
         drive_type = account.get("drive_type", "")
@@ -691,6 +747,31 @@ def create_onedrive_remote(
     return run(cmd, env, display_cmd=display_cmd)
 
 
+def refresh_remote_token(remote_name: str, config_path: Path, env: dict) -> str | None:
+    """Erzwingt einen echten rclone-Aufruf gegen die angegebene Remote, damit
+    rclone ein abgelaufenes Access-Token automatisch per Refresh-Token
+    erneuert - rclone tut das nur bei tatsaechlicher Nutzung, nicht schon beim
+    blossen Anlegen der Config (relevant vor allem bei gespeicherten Konten,
+    deren Token schon eine Weile nicht mehr verwendet wurde). Direkte
+    Microsoft-Graph-Aufrufe wie list_root_items() nutzen das Token roh, ohne
+    rclones eigene Refresh-Logik - deshalb muss hier vorher einmal 'rclone
+    lsd' laufen. Gibt das (ggf. erneuerte) Token aus der Lauf-Config zurueck,
+    oder None wenn die Verbindung fehlschlaegt (z.B. Refresh-Token selbst
+    ungueltig geworden)."""
+    check = subprocess.run(
+        [RCLONE_BIN, "lsd", f"{remote_name}:", "--config", str(config_path), "--max-depth", "1"],
+        env=env, capture_output=True, text=True,
+    )
+    if check.returncode != 0:
+        print(f"Verbindungstest fehlgeschlagen:\n{check.stderr.strip()}")
+        return None
+    parser = configparser.ConfigParser()
+    parser.read(config_path)
+    if remote_name not in parser or "token" not in parser[remote_name]:
+        return None
+    return parser[remote_name]["token"]
+
+
 def run_copy_with_retry(
     source_spec: str,
     target_spec: str,
@@ -753,6 +834,18 @@ def run_copy_tool(args, env: dict, config_path: Path, log_file: Path) -> int:
         print(f"\nConfig fuer Quelle fehlgeschlagen (Exit Code {source_exit}).")
         config_path.unlink(missing_ok=True)
         return source_exit
+
+    # Erzwingt eine Token-Erneuerung ueber rclone, BEVOR das Token direkt (ohne
+    # rclones eigene Refresh-Logik) fuer die folgenden Microsoft-Graph-Aufrufe
+    # verwendet wird - relevant vor allem bei laenger nicht genutzten
+    # gespeicherten Konten, deren Access-Token abgelaufen ist.
+    refreshed_token = refresh_remote_token("source", config_path, env)
+    if refreshed_token is None:
+        print("\nVerbindung zur Quelle fehlgeschlagen - Token evtl. abgelaufen/ungueltig. "
+              "Neu starten und beim Konto 'Bestehendes Konto neu anmelden' waehlen.")
+        config_path.unlink(missing_ok=True)
+        return 1
+    source_info["token"] = refreshed_token
 
     print("\nErmittle Inhalt der Quelle...")
     try:
@@ -933,10 +1026,11 @@ def primary_hash(record: dict) -> str | None:
     return None
 
 
-def _dedupe_row(category: str, group_id: int, f: dict) -> dict:
+def _dedupe_row(category: str, group_id: int, f: dict, share_label: str) -> dict:
     return {
         "Kategorie": category,
         "Gruppe": group_id,
+        "Konto_Share": share_label,
         "Hash": f["_hash"],
         "Dateiname": f["Name"],
         "Pfad": f["Path"],
@@ -945,12 +1039,23 @@ def _dedupe_row(category: str, group_id: int, f: dict) -> dict:
     }
 
 
-def build_report_rows(files: list[dict]) -> list[dict]:
+def build_report_rows(files: list[dict], own_label: str, foreign_names: set[str]) -> list[dict]:
     """Baut die drei Kategorien aus den Datei-Eintraegen. Eine Datei kann in
     mehreren Kategorien auftauchen (z.B. Teil eines sicheren Duplikat-Paars
     UND Teil einer Namenskollision mit einer dritten Datei) - das sind
     unterschiedliche, sich nicht ausschliessende Fragen an die Daten, kein
-    striktes Partitionieren."""
+    striktes Partitionieren.
+
+    own_label wird als 'Konto_Share' fuer Dateien im eigenen Speicher
+    eingetragen; liegt eine Datei unterhalb eines Root-Ordners aus
+    foreign_names (Verknuepfung zu einem Fremd-Konto/einer Fremd-Site), wird
+    stattdessen dessen Name eingetragen - so ist pro Zeile direkt erkennbar,
+    ob ein Duplikat im eigenen Konto liegt oder in einer verknuepften
+    Freigabe."""
+    def share_label(path: str) -> str:
+        top_level = path.split("/", 1)[0]
+        return top_level if top_level in foreign_names else own_label
+
     by_name = defaultdict(list)
     by_hash = defaultdict(list)
     by_name_hash = defaultdict(list)
@@ -976,25 +1081,25 @@ def build_report_rows(files: list[dict]) -> list[dict]:
         if len(group) < 2:
             continue
         group_id += 1
-        rows += [_dedupe_row("1_sicheres_duplikat", group_id, f) for f in group]
+        rows += [_dedupe_row("1_sicheres_duplikat", group_id, f, share_label(f["Path"])) for f in group]
 
     for group in by_name.values():
         if len({f["_hash"] for f in group}) < 2:
             continue
         group_id += 1
-        rows += [_dedupe_row("2_nur_name_gleich", group_id, f) for f in group]
+        rows += [_dedupe_row("2_nur_name_gleich", group_id, f, share_label(f["Path"])) for f in group]
 
     for group in by_hash.values():
         if len({f["Name"] for f in group}) < 2:
             continue
         group_id += 1
-        rows += [_dedupe_row("3_nur_hash_gleich", group_id, f) for f in group]
+        rows += [_dedupe_row("3_nur_hash_gleich", group_id, f, share_label(f["Path"])) for f in group]
 
     return rows
 
 
 def write_dedupe_csv(rows: list[dict], output_path: str) -> None:
-    fieldnames = ["Kategorie", "Gruppe", "Hash", "Dateiname", "Pfad", "Groesse", "Letzte_Aenderung"]
+    fieldnames = ["Kategorie", "Gruppe", "Konto_Share", "Hash", "Dateiname", "Pfad", "Groesse", "Letzte_Aenderung"]
     # utf-8-sig: Excel unter Windows zeigt Umlaute ohne BOM sonst falsch an.
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -1030,6 +1135,14 @@ def run_dedupe_tool(args, env: dict, config_path: Path, timestamp: str) -> int:
         config_path.unlink(missing_ok=True)
         return scan_exit
 
+    refreshed_token = refresh_remote_token("scan", config_path, env)
+    if refreshed_token is None:
+        print("\nVerbindung zum Konto fehlgeschlagen - Token evtl. abgelaufen/ungueltig. "
+              "Neu starten und beim Konto 'Bestehendes Konto neu anmelden' waehlen.")
+        config_path.unlink(missing_ok=True)
+        return 1
+    scan_info["token"] = refreshed_token
+
     print("\nErmittle Inhalt des Kontos...")
     try:
         root_items = list_root_items(scan_info["token"], scan_info["drive_id"], args.ca_cert_bundle)
@@ -1055,7 +1168,9 @@ def run_dedupe_tool(args, env: dict, config_path: Path, timestamp: str) -> int:
         return 1
     print(f"{len(files)} Dateien gefunden.")
 
-    rows = build_report_rows(files)
+    foreign_names = {item["name"] for item in root_items if item["is_foreign"]}
+    own_label = scan_info.get("account_name") or scan_info["identity"]
+    rows = build_report_rows(files, own_label, foreign_names)
     write_dedupe_csv(rows, output_path)
     open_in_viewer(output_path)
 

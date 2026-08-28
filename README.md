@@ -16,12 +16,16 @@ accounts):
 
 At startup you choose which of the two tools to use. Each login (source,
 target, or the account to scan for duplicates) first offers any **previously
-saved accounts** to pick from — no need to log in again, rclone refreshes the
-token automatically in the background — or the option to log in fresh. After
-a fresh login you can optionally save the account under a name (e.g. `Jane
-Doe (Personal)`) so it shows up next time. Saved accounts live in
-`accounts.conf` next to the script (see [Logs & data](#logs--data) below) and
-are never committed to this repository.
+saved accounts** to pick from — no need to log in again, the tool refreshes
+the token automatically before using it — or the option to log in fresh.
+After a fresh login you can optionally save the account under a name (e.g.
+`Jane Doe (Personal)`) so it shows up next time. If a saved account's token
+has stopped working entirely (e.g. `HTTP Error 401: Unauthorized` after a
+password change or long inactivity), the account picker also offers
+**"Bestehendes Konto neu anmelden"** (re-authenticate an existing account) —
+it replaces just the token, keeping the saved name and drive ID. Saved
+accounts live in `accounts.conf` next to the script (see [Logs &
+data](#logs--data) below) and are never committed to this repository.
 
 ### Tool 1: Copy/migrate
 
@@ -49,6 +53,10 @@ files into:
 - **1_sicheres_duplikat** — same name *and* same hash (safe to dedupe)
 - **2_nur_name_gleich** — same filename, different content (needs a manual look)
 - **3_nur_hash_gleich** — identical content, different filename (renamed copy)
+
+Every row also has a `Konto_Share` column: the scanned account's name for
+files in its own storage, or the name of the shared-folder link for files
+that live under a foreign OneDrive/SharePoint share.
 
 It always skips the Personal Vault (inaccessible via the API regardless), but
 — unlike the copy tool — it does NOT exclude folders that are shortcuts to
