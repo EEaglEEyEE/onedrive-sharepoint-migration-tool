@@ -62,8 +62,12 @@ nur AUSGEWAEHLTE Ordner, und in welchen Ziel-Unterordner (leer = Root).
   unten) - sonst re-uploaded jeder erneute Lauf faelschlich alles, was bei
   OneDrive Business unbemerkt die Versionshistorie aufblaeht.
 - Direkt vor dem Kopieren wird eine Zusammenfassung (Quelle, Ziel, Umfang,
-  Exclusions, geplante Kopiervorgaenge) angezeigt UND in die Log-Datei
-  geschrieben (zusaetzlich zu rclones eigenen Log-Zeilen).
+  Exclusions, Gesamtgroesse samt grober Zeitschaetzung, geplante
+  Kopiervorgaenge) angezeigt UND in die Log-Datei geschrieben (zusaetzlich zu
+  rclones eigenen Log-Zeilen). Die Zeitschaetzung ist nur eine grobe
+  Orientierung (optimistische vs. konservative Bandbreiten-Annahme) - sobald
+  der Kopiervorgang laeuft, zeigt rclones eigene Fortschrittsanzeige eine aus
+  der tatsaechlichen Geschwindigkeit live berechnete, verlaesslichere ETA.
 - Nach Abschluss werden Log-Datei und (falls vorhanden) eine extrahierte
   Fehler-Log-Datei automatisch geoeffnet.
 
@@ -772,6 +776,57 @@ def refresh_remote_token(remote_name: str, config_path: Path, env: dict) -> str 
     return parser[remote_name]["token"]
 
 
+def human_size(num_bytes: float) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(num_bytes) < 1024:
+            return f"{num_bytes:.1f} {unit}"
+        num_bytes /= 1024
+    return f"{num_bytes:.1f} PiB"
+
+
+def get_remote_size(spec: str, config_path: Path, env: dict, exclude_args: list[str]) -> tuple[int, int] | None:
+    """Ermittelt Gesamtgroesse (Bytes) und Dateianzahl unter 'spec' via
+    'rclone size --json', mit denselben --exclude-Mustern wie der eigentliche
+    Kopiervorgang (NICHT die --ignore-size/--ignore-checksum-Flags - die
+    kennt 'rclone size' nicht, die sind nur fuer copy/check relevant). Gibt
+    (bytes, count) zurueck, oder None bei Fehler - reine Zusatzinfo fuer die
+    Zusammenfassung, ein Fehlschlag soll den eigentlichen Kopiervorgang nicht
+    verhindern."""
+    cmd = [RCLONE_BIN, "size", spec, "--config", str(config_path), "--json"] + exclude_args
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+        return data["bytes"], data["count"]
+    except (json.JSONDecodeError, KeyError):
+        return None
+
+
+def estimate_transfer_time(total_bytes: int) -> str:
+    """Grobe Zeitspanne basierend auf einer optimistischen (100 MBit/s) und
+    einer konservativen (10 MBit/s) angenommenen Netzwerk-Bandbreite - keine
+    Vorhersage, nur Groessenordnung. Die tatsaechliche Geschwindigkeit haengt
+    stark von der eigenen Internetverbindung und von Microsoft-Graph-Drosselung
+    ab, vor allem bei vielen kleinen Dateien (Overhead pro API-Request) statt
+    wenigen grossen. Waehrend des Kopierens zeigt rclones eigene
+    Fortschrittsanzeige eine live aus der tatsaechlichen Geschwindigkeit
+    berechnete, deutlich verlaesslichere ETA."""
+    def human_duration(seconds: float) -> str:
+        seconds = max(seconds, 1)
+        minutes = seconds / 60
+        if minutes < 60:
+            return f"{minutes:.0f} Min."
+        hours = minutes / 60
+        if hours < 48:
+            return f"{hours:.1f} Std."
+        return f"{hours / 24:.1f} Tage"
+
+    optimistic_seconds = (total_bytes * 8) / (100 * 1_000_000)
+    conservative_seconds = (total_bytes * 8) / (10 * 1_000_000)
+    return f"{human_duration(optimistic_seconds)} - {human_duration(conservative_seconds)}"
+
+
 def run_copy_with_retry(
     source_spec: str,
     target_spec: str,
@@ -933,6 +988,17 @@ def run_copy_tool(args, env: dict, config_path: Path, log_file: Path) -> int:
         config_path.unlink(missing_ok=True)
         return connectivity_exit
 
+    print("Ermittle Gesamtgroesse der Quelle (kann bei vielen Dateien einen Moment dauern)...")
+    total_bytes, total_count = 0, 0
+    size_known = True
+    for src, _tgt in copy_pairs:
+        pair_size = get_remote_size(src, config_path, env, exclude_args)
+        if pair_size is None:
+            size_known = False
+            break
+        total_bytes += pair_size[0]
+        total_count += pair_size[1]
+
     # --- Zusammenfassung, direkt vor dem eigentlichen Kopieren ---
     print("\n=== Zusammenfassung ===")
     summary_lines = [
@@ -941,6 +1007,15 @@ def run_copy_tool(args, env: dict, config_path: Path, log_file: Path) -> int:
         f"Umfang: {'gesamter Inhalt' if selected_folders is None else 'ausgewaehlte Ordner: ' + ', '.join(selected_folders)}",
         f"Exclusion: {', '.join(f'{n}/**' for n in exclude_names) if exclude_names else 'keine'}",
     ]
+    if size_known:
+        summary_lines.append(
+            f"Gesamtgroesse: {human_size(total_bytes)} ({total_count} Dateien) - "
+            f"grobe Zeitschaetzung: {estimate_transfer_time(total_bytes)} "
+            "(abhaengig von Internetverbindung/Microsoft-Drosselung; waehrend des "
+            "Kopierens zeigt rclone eine live berechnete, verlaesslichere ETA)."
+        )
+    else:
+        summary_lines.append("Gesamtgroesse: konnte nicht ermittelt werden (rclone size fehlgeschlagen) - keine Zeitschaetzung moeglich.")
     if needs_ignore_flags:
         summary_lines.append(
             "Hinweis: Ziel ist SharePoint bzw. OneDrive Business - Groessen- und "
