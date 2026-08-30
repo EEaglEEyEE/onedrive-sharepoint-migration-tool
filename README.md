@@ -40,12 +40,9 @@ SharePoint site -> SharePoint site
 
 Then whether to copy the entire drive or only selected folders, and into
 which target subfolder. It shows a summary (source, target, scope,
-exclusions, total size and file count via `rclone size`, a rough transfer
-time range, planned copy operations) before anything is copied, retries
+exclusions, planned copy operations) before anything is copied, retries
 failed files automatically, and opens the log (plus an extracted error log)
-when done. The time range is a very rough estimate (optimistic vs.
-conservative bandwidth assumption) — once the actual copy starts, rclone's
-own progress display shows a live ETA computed from the real observed speed.
+when done.
 
 ### Tool 2: Find duplicates
 
