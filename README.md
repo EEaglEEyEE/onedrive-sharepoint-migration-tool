@@ -80,11 +80,19 @@ for review.
 - SharePoint — and OneDrive **for Business**, which runs on the same backend —
   modifies certain Office file types (`.docx`/`.xlsx`/...) shortly after
   upload (embedded compatibility metadata), which changes their size and
-  hash. Plain rclone misreads this as transfer corruption, deletes the
-  (actually fine) uploaded file, and re-uploads it as a new version on every
-  run — silently bloating OneDrive's version history storage over repeated
-  runs. This tool passes `--ignore-size --ignore-checksum` for SharePoint and
-  OneDrive-Business targets to avoid both problems.
+  hash. Plain rclone misreads this as transfer corruption and deletes the
+  (actually fine) uploaded file. This tool passes `--ignore-size
+  --ignore-checksum` for SharePoint and OneDrive-Business targets to avoid
+  that.
+- Both target types also create a **new file version on every modifying
+  operation** (upload, overwrite, or even just setting the modification
+  time), which counts against storage quota. Repeated/resumed runs — even
+  ones where every file is already byte-identical at the destination — can
+  silently accumulate hundreds of GB of redundant version history this way.
+  This tool sets rclone's `no_versions` remote option for SharePoint and
+  OneDrive-Business targets, which automatically removes the extra versions
+  after each modifying operation. (Not applied to OneDrive Personal — rclone
+  can't delete versions there.)
 
 ## Requirements
 

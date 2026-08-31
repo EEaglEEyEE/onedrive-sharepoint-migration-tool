@@ -59,8 +59,13 @@ nur AUSGEWAEHLTE Ordner, und in welchen Ziel-Unterordner (leer = Root).
 - Fuer SharePoint- UND OneDrive-Business-Ziele wird die Groessen-/Pruefsummen-
   pruefung nach Upload deaktiviert, da diese Backends Office-Dateien
   serverseitig veraendern (siehe Kommentar bei needs_ignore_flags weiter
-  unten) - sonst re-uploaded jeder erneute Lauf faelschlich alles, was bei
-  OneDrive Business unbemerkt die Versionshistorie aufblaeht.
+  unten). Zusaetzlich wird fuer diese Zielarten der rclone-Remote-Parameter
+  'no_versions' gesetzt, der ueberzaehlige, bei jedem erneuten Lauf sonst neu
+  angelegte Dateiversionen automatisch wieder entfernt (real beobachtet: 490
+  GiB unnoetige Versionshistorie durch mehrfach wiederholte Laeufe, wo jede
+  einzelne Datei - unveraendert! - bei jedem Lauf eine neue Version bekam).
+  NICHT bei OneDrive Personal setzen (rclone kann dort keine Versionen
+  loeschen) - deshalb an dieselbe Bedingung wie die Ignore-Flags gekoppelt.
 - Direkt vor dem Kopieren wird eine Zusammenfassung (Quelle, Ziel, Umfang,
   Exclusions, geplante Kopiervorgaenge) angezeigt UND in die Log-Datei
   geschrieben (zusaetzlich zu rclones eigenen Log-Zeilen).
@@ -875,8 +880,24 @@ def run_copy_tool(args, env: dict, config_path: Path, log_file: Path) -> int:
 
     # --- Ziel ---
     target_info = resolve_endpoint(env, "Ziel", args.ca_cert_bundle, config_path)
+    # SharePoint UND OneDrive for Business erzeugen bei JEDER "aendernden"
+    # Operation (Upload/Ueberschreiben, aber auch nur das Setzen der
+    # Modification-Time) eine neue Dateiversion, die den Speicherplatz zaehlt
+    # - anders als OneDrive Personal, das das nicht tut. rclones onedrive-
+    # Backend hat dafuer den dokumentierten Remote-Parameter 'no_versions':
+    # damit werden ueberzaehlige Versionen nach jeder aendernden Operation
+    # automatisch wieder entfernt (kostet zusaetzliche API-Aufrufe, daher nur
+    # fuer diese Zielarten gesetzt). Real beobachtet: 490 GiB unnoetige
+    # Versionshistorie bei einem mehrfach wiederholten Migrationslauf gegen
+    # ein OneDrive-Business-Ziel, wo JEDE Datei bei jedem erneuten Lauf eine
+    # neue (inhaltlich IDENTISCHE) Version bekam. Laut rclone-Doku darf
+    # 'no_versions' NICHT gegen OneDrive Personal gesetzt werden ("Onedrive
+    # personal can't currently delete versions") - deshalb an dieselbe
+    # Bedingung wie needs_ignore_flags gekoppelt.
+    needs_ignore_flags = target_info["kind"] == "sharepoint" or target_info.get("drive_type") == "business"
     target_exit = create_onedrive_remote(
         "target", target_info["token"], target_info["drive_id"], target_info["drive_type"], config_path, env,
+        extra_config={"no_versions": "true"} if needs_ignore_flags else None,
     )
     if target_exit != 0:
         print(f"\nConfig fuer Ziel fehlgeschlagen (Exit Code {target_exit}).")
@@ -908,20 +929,10 @@ def run_copy_tool(args, env: dict, config_path: Path, log_file: Path) -> int:
     # sich Groesse UND Pruefsumme aendern. rclone haelt das faelschlicherweise
     # fuer eine fehlgeschlagene Uebertragung ("corrupted on transfer: sizes/
     # hashes differ") und LOESCHT die gerade hochgeladene (tatsaechlich
-    # intakte) Datei wieder - und wiederholt das bei jedem Retry erneut, weil
-    # SharePoint die Datei bei jedem erneuten Versuch wieder anders veraendert
-    # (nie identisch zur Quelle). OneDrive FOR BUSINESS laeuft auf derselben
-    # SharePoint-Backend-Infrastruktur und zeigt denselben Effekt: ein Log vom
-    # 2026-08-26 zeigte bei einem erneuten "gesamter Inhalt"-Lauf gegen ein
-    # OneDrive-Business-Ziel 66.155 "replaced existing" bei 0 "new" (Ziel hatte
-    # schon alles) und 285 GiB neu hochgeladen, obwohl die Quelle nur ~120 GB
-    # hat - jeder erneute Upload landet dabei als NEUE VERSION in OneDrives
-    # Versionshistorie, ohne die alte zu ersetzen, was den Speicherverbrauch
-    # bei wiederholten Laeufen unbemerkt aufblaeht (120GB Inhalt -> 780GB
-    # belegter Speicher). --ignore-size/--ignore-checksum sind hier absichtlich
-    # gesetzt, um diesen Effekt nicht mit echter Uebertragungskorruption zu
-    # verwechseln UND um wiederholte, unnoetige Re-Uploads zu vermeiden.
-    needs_ignore_flags = target_info["kind"] == "sharepoint" or target_info.get("drive_type") == "business"
+    # intakte) Datei wieder. --ignore-size/--ignore-checksum sind hier
+    # absichtlich gesetzt, um diesen Effekt nicht mit echter
+    # Uebertragungskorruption zu verwechseln (needs_ignore_flags wurde bereits
+    # weiter oben berechnet, siehe Kommentar dort zu 'no_versions').
     copy_extra_args = list(exclude_args)
     if needs_ignore_flags:
         copy_extra_args += ["--ignore-size", "--ignore-checksum"]
