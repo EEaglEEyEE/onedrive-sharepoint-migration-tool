@@ -31,9 +31,9 @@ Schritte auf einem Windows-Rechner:
    Falls "python" ebenfalls nicht gefunden wird, stattdessen "py -m PyInstaller ...".
 
    Ergebnis liegt danach in: dist\onedrive-sharepoint-migration-tool.exe
-   (einzelne Datei, Python + rclone bereits eingebettet, enthaelt BEIDE
-   Werkzeuge - Kopieren/Migrieren UND Duplikate finden, ueber ein Menue beim
-   Start auswaehlbar - ca. 30-40 MB)
+   (einzelne Datei, Python + rclone bereits eingebettet, ca. 30-40 MB).
+   Enthaelt BEIDE Werkzeuge (Kopieren/Migrieren + Duplikate finden) - beim
+   Start waehlt man per Menue, welches genutzt werden soll.
 
 5. dist\onedrive-sharepoint-migration-tool.exe in den gewuenschten Zielordner
    kopieren (gleicher Ordner wie onedrive-sharepoint-migration-tool.bat).
