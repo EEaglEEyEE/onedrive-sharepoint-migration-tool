@@ -25,13 +25,20 @@ zusaetzlich "Bestehendes Konto neu anmelden" zur Verfuegung - das ersetzt nur
 das Token, Drive-ID/-Typ und der Name bleiben erhalten.
 
 --- Werkzeug 1: Kopieren/Migrieren ---
-Fragt Quelle UND Ziel unabhaengig voneinander ab (jeweils OneDrive oder
-SharePoint-Site), z.B.:
+Fragt Quelle UND Ziel unabhaengig voneinander ab (jeweils OneDrive, SharePoint-
+Site, oder ein lokaler Pfad/bereits verbundenes Netzlaufwerk), z.B.:
 
-  OneDrive     -> OneDrive
-  OneDrive     -> SharePoint-Site
+  OneDrive        -> OneDrive
+  OneDrive        -> SharePoint-Site
   SharePoint-Site -> OneDrive
   SharePoint-Site -> SharePoint-Site
+  OneDrive/SharePoint-Site -> lokaler Pfad/Netzlaufwerk (Backup)
+  lokaler Pfad/Netzlaufwerk -> OneDrive/SharePoint-Site (Restore/Upload)
+
+Ein lokaler Pfad/Netzlaufwerk braucht keinen Login und wird nicht als Konto
+gespeichert - ein bereits im Dateisystem eingebundenes Netzlaufwerk (macOS:
+/Volumes/..., Windows: Laufwerksbuchstabe oder UNC-Pfad) ist fuer rclone
+technisch ein ganz normaler lokaler Pfad.
 
 Danach wird gefragt, ob der GESAMTE Inhalt der Quelle kopiert werden soll oder
 nur AUSGEWAEHLTE Ordner, und in welchen Ziel-Unterordner (leer = Root).
@@ -127,7 +134,26 @@ CHECKERS = 16
 COPY_RETRY_ATTEMPTS = 3
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 
-WORK_DIR = Path.home() / "Claude" / "onedrive-sharepoint-migration-tool"
+def _resolve_work_dir() -> Path:
+    """Arbeitsverzeichnis (accounts.conf, rclone-Temp-Configs, Logs) liegt
+    IMMER neben dem laufenden Programm selbst - nie an einem hart codierten
+    Pfad wie z.B. "~/Claude/..." (dieser Ordner wurde bereits einmal
+    verschoben, was die alte fest verdrahtete Variante stillschweigend
+    ins Leere haette laufen lassen: eine neue, leere accounts.conf am alten
+    Pfad statt der echten gespeicherten Konten am neuen Pfad). So bleibt es
+    unabhaengig davon, wo der Ordner gerade liegt.
+    """
+    if getattr(sys, "frozen", False):
+        exe_path = Path(sys.executable).resolve()
+        if ".app/Contents/Resources" in str(exe_path):
+            # Eingebettete Kopie im .app-Bundle - Projektordner liegt drei
+            # Ebenen hoeher (Resources -> Contents -> .app -> Projektordner).
+            return exe_path.parent.parent.parent
+        return exe_path.parent
+    return Path(__file__).resolve().parent
+
+
+WORK_DIR = _resolve_work_dir()
 ACCOUNTS_CONFIG_PATH = WORK_DIR / "accounts.conf"
 DESKTOP_DIR = Path.home() / "Desktop"
 
@@ -640,11 +666,44 @@ def prompt_endpoint_type(label: str) -> str:
     print(f"\n=== {label} ===")
     print("  1. OneDrive")
     print("  2. SharePoint-Site")
+    print("  3. Lokaler Pfad / Netzlaufwerk")
     while True:
-        choice = input("Auswahl (1/2): ").strip()
-        if choice in ("1", "2"):
-            return "onedrive" if choice == "1" else "sharepoint"
-        print("Ungueltige Eingabe - bitte 1 oder 2 eingeben.")
+        choice = input("Auswahl (1/2/3): ").strip()
+        if choice in ("1", "2", "3"):
+            return {"1": "onedrive", "2": "sharepoint", "3": "local"}[choice]
+        print("Ungueltige Eingabe - bitte 1, 2 oder 3 eingeben.")
+
+
+def prompt_local_path(label: str) -> str:
+    """Fragt einen lokalen Pfad ab - deckt auch Netzlaufwerke ab, die bereits
+    im Dateisystem eingebunden sind (macOS: /Volumes/..., Windows: Z:\\... oder
+    \\\\server\\share): fuer rclone ist ein eingebundenes Netzlaufwerk technisch
+    ein ganz normaler lokaler Pfad, kein eigener Remote-Typ noetig."""
+    while True:
+        raw = input(f"\nPfad fuer {label} (lokal oder bereits verbundenes Netzlaufwerk): ").strip().strip('"')
+        if not raw:
+            print("Bitte einen Pfad eingeben.")
+            continue
+        path = Path(raw).expanduser()
+        if not path.exists():
+            print(f"Hinweis: '{path}' existiert noch nicht - wird beim Kopieren ggf. automatisch angelegt.")
+        return str(path)
+
+
+def list_local_root_items(path: str) -> list[dict]:
+    """Listet die Eintraege im Root eines lokalen Pfads - im selben Format wie
+    list_root_items(), damit prompt_folder_selection()/detect_root_exclusions()
+    unveraendert wiederverwendet werden koennen. is_foreign/is_locked_vault
+    gibt es lokal nicht, bleiben also immer False."""
+    items: list[dict] = []
+    for entry in sorted(Path(path).iterdir()):
+        items.append({
+            "name": entry.name,
+            "is_folder": entry.is_dir(),
+            "is_foreign": False,
+            "is_locked_vault": False,
+        })
+    return items
 
 
 def resolve_endpoint(env: dict, label: str, ca_cert_bundle: str | None, config_path: Path) -> dict:
@@ -670,6 +729,15 @@ def resolve_endpoint(env: dict, label: str, ca_cert_bundle: str | None, config_p
         }
 
     endpoint_type = prompt_endpoint_type(label)
+    if endpoint_type == "local":
+        path = prompt_local_path(label)
+        return {
+            "kind": "local",
+            "path": path,
+            "identity": f"Lokal/Netzlaufwerk ({path})",
+            "account_name": None,
+        }
+
     type_label = "OneDrive" if endpoint_type == "onedrive" else "SharePoint"
     token = rclone_authorize_onedrive(env, f"{label} ({type_label})")
 
@@ -752,6 +820,16 @@ def create_onedrive_remote(
     return run(cmd, env, display_cmd=display_cmd)
 
 
+def join_endpoint_path(base: str, subpath: str) -> str:
+    """Haengt einen relativen Unterpfad an eine rclone-Remote ('name:') ODER
+    einen rohen lokalen Pfad an - je nachdem, ob 'base' mit ':' endet."""
+    if not subpath:
+        return base
+    if base.endswith(":"):
+        return f"{base}{subpath}"
+    return f"{base.rstrip('/')}/{subpath}"
+
+
 def refresh_remote_token(remote_name: str, config_path: Path, env: dict) -> str | None:
     """Erzwingt einen echten rclone-Aufruf gegen die angegebene Remote, damit
     rclone ein abgelaufenes Access-Token automatisch per Refresh-Token
@@ -831,34 +909,43 @@ def run_copy_with_retry(
 def run_copy_tool(args, env: dict, config_path: Path, log_file: Path) -> int:
     # --- Quelle ---
     source_info = resolve_endpoint(env, "Quelle", args.ca_cert_bundle, config_path)
-    source_exit = create_onedrive_remote(
-        "source", source_info["token"], source_info["drive_id"], source_info["drive_type"], config_path, env,
-        extra_config={"disable_site_permission": "true"} if source_info["kind"] == "onedrive" else None,
-    )
-    if source_exit != 0:
-        print(f"\nConfig fuer Quelle fehlgeschlagen (Exit Code {source_exit}).")
-        config_path.unlink(missing_ok=True)
-        return source_exit
+    if source_info["kind"] == "local":
+        print("\nErmittle Inhalt der Quelle...")
+        try:
+            root_items = list_local_root_items(source_info["path"])
+        except OSError as exc:
+            print(f"\nKonnte lokalen Pfad nicht lesen: {exc}")
+            config_path.unlink(missing_ok=True)
+            return 1
+    else:
+        source_exit = create_onedrive_remote(
+            "source", source_info["token"], source_info["drive_id"], source_info["drive_type"], config_path, env,
+            extra_config={"disable_site_permission": "true"} if source_info["kind"] == "onedrive" else None,
+        )
+        if source_exit != 0:
+            print(f"\nConfig fuer Quelle fehlgeschlagen (Exit Code {source_exit}).")
+            config_path.unlink(missing_ok=True)
+            return source_exit
 
-    # Erzwingt eine Token-Erneuerung ueber rclone, BEVOR das Token direkt (ohne
-    # rclones eigene Refresh-Logik) fuer die folgenden Microsoft-Graph-Aufrufe
-    # verwendet wird - relevant vor allem bei laenger nicht genutzten
-    # gespeicherten Konten, deren Access-Token abgelaufen ist.
-    refreshed_token = refresh_remote_token("source", config_path, env)
-    if refreshed_token is None:
-        print("\nVerbindung zur Quelle fehlgeschlagen - Token evtl. abgelaufen/ungueltig. "
-              "Neu starten und beim Konto 'Bestehendes Konto neu anmelden' waehlen.")
-        config_path.unlink(missing_ok=True)
-        return 1
-    source_info["token"] = refreshed_token
+        # Erzwingt eine Token-Erneuerung ueber rclone, BEVOR das Token direkt (ohne
+        # rclones eigene Refresh-Logik) fuer die folgenden Microsoft-Graph-Aufrufe
+        # verwendet wird - relevant vor allem bei laenger nicht genutzten
+        # gespeicherten Konten, deren Access-Token abgelaufen ist.
+        refreshed_token = refresh_remote_token("source", config_path, env)
+        if refreshed_token is None:
+            print("\nVerbindung zur Quelle fehlgeschlagen - Token evtl. abgelaufen/ungueltig. "
+                  "Neu starten und beim Konto 'Bestehendes Konto neu anmelden' waehlen.")
+            config_path.unlink(missing_ok=True)
+            return 1
+        source_info["token"] = refreshed_token
 
-    print("\nErmittle Inhalt der Quelle...")
-    try:
-        root_items = list_root_items(source_info["token"], source_info["drive_id"], args.ca_cert_bundle)
-    except (urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
-        print(f"\nKonnte Ordnerliste nicht ermitteln: {exc}")
-        config_path.unlink(missing_ok=True)
-        return 1
+        print("\nErmittle Inhalt der Quelle...")
+        try:
+            root_items = list_root_items(source_info["token"], source_info["drive_id"], args.ca_cert_bundle)
+        except (urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
+            print(f"\nKonnte Ordnerliste nicht ermitteln: {exc}")
+            config_path.unlink(missing_ok=True)
+            return 1
 
     # --- Umfang: gesamter Inhalt oder ausgewaehlte Ordner ---
     print("\n=== Umfang ===")
@@ -895,14 +982,22 @@ def run_copy_tool(args, env: dict, config_path: Path, log_file: Path) -> int:
     # personal can't currently delete versions") - deshalb an dieselbe
     # Bedingung wie needs_ignore_flags gekoppelt.
     needs_ignore_flags = target_info["kind"] == "sharepoint" or target_info.get("drive_type") == "business"
-    target_exit = create_onedrive_remote(
-        "target", target_info["token"], target_info["drive_id"], target_info["drive_type"], config_path, env,
-        extra_config={"no_versions": "true"} if needs_ignore_flags else None,
-    )
-    if target_exit != 0:
-        print(f"\nConfig fuer Ziel fehlgeschlagen (Exit Code {target_exit}).")
-        config_path.unlink(missing_ok=True)
-        return target_exit
+    if target_info["kind"] != "local":
+        target_exit = create_onedrive_remote(
+            "target", target_info["token"], target_info["drive_id"], target_info["drive_type"], config_path, env,
+            extra_config={"no_versions": "true"} if needs_ignore_flags else None,
+        )
+        if target_exit != 0:
+            print(f"\nConfig fuer Ziel fehlgeschlagen (Exit Code {target_exit}).")
+            config_path.unlink(missing_ok=True)
+            return target_exit
+
+    # source_base/target_base sind entweder die rclone-Remote-Namen ("source:"/
+    # "target:") oder - bei lokalen Pfaden/Netzlaufwerken - der rohe Dateisystem-
+    # pfad. rclone behandelt einen bereits eingebundenen lokalen Pfad wie jeden
+    # anderen Remote, es ist also kein eigener Config-Eintrag noetig.
+    source_base = source_info["path"] if source_info["kind"] == "local" else "source:"
+    target_base = target_info["path"] if target_info["kind"] == "local" else "target:"
 
     target_subfolder = input("\nZiel-Unterordner (leer = Root des Ziels): ").strip().strip("/")
 
@@ -911,14 +1006,14 @@ def run_copy_tool(args, env: dict, config_path: Path, log_file: Path) -> int:
     # Ordner -> je ein gleichnamiger Unterordner, damit sich die Inhalte nicht
     # vermischen.
     if selected_folders is None:
-        copy_pairs = [("source:", f"target:{target_subfolder}" if target_subfolder else "target:")]
+        copy_pairs = [(source_base, join_endpoint_path(target_base, target_subfolder))]
     elif len(selected_folders) == 1:
-        copy_pairs = [(f"source:{selected_folders[0]}", f"target:{target_subfolder}" if target_subfolder else "target:")]
+        copy_pairs = [(join_endpoint_path(source_base, selected_folders[0]), join_endpoint_path(target_base, target_subfolder))]
     else:
         copy_pairs = []
         for folder in selected_folders:
             target_path = f"{target_subfolder}/{folder}" if target_subfolder else folder
-            copy_pairs.append((f"source:{folder}", f"target:{target_path}"))
+            copy_pairs.append((join_endpoint_path(source_base, folder), join_endpoint_path(target_base, target_path)))
 
     exclude_args: list[str] = []
     for name in exclude_names:
@@ -937,12 +1032,20 @@ def run_copy_tool(args, env: dict, config_path: Path, log_file: Path) -> int:
     if needs_ignore_flags:
         copy_extra_args += ["--ignore-size", "--ignore-checksum"]
 
-    print("\nVerbindung zum Ziel pruefen...")
-    connectivity_exit = run([RCLONE_BIN, "lsd", "target:", "--config", str(config_path), "--max-depth", "1"], env)
-    if connectivity_exit != 0:
-        print(f"\nKonnte Ziel nicht auflisten (Exit Code {connectivity_exit}) - Abbruch.")
-        config_path.unlink(missing_ok=True)
-        return connectivity_exit
+    if target_info["kind"] == "local":
+        try:
+            Path(target_info["path"]).mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            print(f"\nKonnte Ziel-Pfad nicht anlegen/beschreiben: {exc} - Abbruch.")
+            config_path.unlink(missing_ok=True)
+            return 1
+    else:
+        print("\nVerbindung zum Ziel pruefen...")
+        connectivity_exit = run([RCLONE_BIN, "lsd", "target:", "--config", str(config_path), "--max-depth", "1"], env)
+        if connectivity_exit != 0:
+            print(f"\nKonnte Ziel nicht auflisten (Exit Code {connectivity_exit}) - Abbruch.")
+            config_path.unlink(missing_ok=True)
+            return connectivity_exit
 
     # --- Zusammenfassung, direkt vor dem eigentlichen Kopieren ---
     print("\n=== Zusammenfassung ===")

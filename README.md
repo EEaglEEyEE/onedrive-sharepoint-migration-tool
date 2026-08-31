@@ -32,11 +32,18 @@ data](#logs--data) below) and are never committed to this repository.
 Source and target are asked independently, so any combination works:
 
 ```
-OneDrive        -> OneDrive
-OneDrive        -> SharePoint site
-SharePoint site -> OneDrive
-SharePoint site -> SharePoint site
+OneDrive                     -> OneDrive
+OneDrive                     -> SharePoint site
+SharePoint site               -> OneDrive
+SharePoint site               -> SharePoint site
+OneDrive/SharePoint site      -> local path / network drive   (backup)
+local path / network drive    -> OneDrive/SharePoint site      (restore/upload)
 ```
+
+A local path or network drive needs no login and isn't saved as an account —
+just type the path. An already-mounted network drive (macOS `/Volumes/...`,
+Windows a drive letter or UNC path) is, as far as rclone is concerned, just a
+regular local path.
 
 Then whether to copy the entire drive or only selected folders, and into
 which target subfolder. It shows a summary (source, target, scope,
