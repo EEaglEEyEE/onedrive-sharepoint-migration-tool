@@ -1,6 +1,20 @@
 Windows-EXE selbst bauen (einmalig, auf einem echten Windows-Rechner)
 ======================================================================
 
+Abkuerzung: build_exe.ps1 (im selben Ordner) automatisiert alle Schritte
+unten - prueft Python, installiert PyInstaller, laedt rclone.exe bei Bedarf
+automatisch herunter und startet den Build. Einfach in PowerShell ausfuehren:
+
+     .\build_exe.ps1
+
+Falls PowerShell die Ausfuehrung von Skripten blockiert ("... is not digitally
+signed"), einmalig erlauben:
+
+     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+Die manuellen Schritte unten sind fuer den Fall, dass das Skript nicht
+verwendet werden soll/kann.
+
 Warum: PyInstaller baut nur fuer das Betriebssystem, auf dem es laeuft - eine
 echte Windows-.exe kann nicht von diesem Mac aus gebaut werden. Die macOS-
 Variante (onedrive-sharepoint-migration-tool, ohne Dateiendung) ist bereits

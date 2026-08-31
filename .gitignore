@@ -13,3 +13,5 @@ onedrive-sharepoint-migration-tool.exe
 onedrive-sharepoint-migration-tool.app/
 onedrive_dedupe_report
 onedrive_dedupe_report.exe
+rclone
+rclone.exe

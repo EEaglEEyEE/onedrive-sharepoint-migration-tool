@@ -146,8 +146,10 @@ pyinstaller --onefile --console --name onedrive-sharepoint-migration-tool --add-
 ```
 
 See [BUILD_WINDOWS.txt](BUILD_WINDOWS.txt) for detailed step-by-step Windows
-build instructions. PyInstaller can only build for the OS it runs on, so the
-Windows executable must be built on Windows.
+build instructions, or just run [build_exe.ps1](build_exe.ps1) in PowerShell
+on a Windows machine — it automates all of the steps, including downloading
+rclone.exe if it's not already next to the script. PyInstaller can only build
+for the OS it runs on, so the Windows executable must be built on Windows.
 
 ## Logs & data
 
