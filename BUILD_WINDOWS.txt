@@ -12,42 +12,42 @@ signed"), einmalig erlauben:
 
      Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
-Die manuellen Schritte unten sind fuer den Fall, dass das Skript nicht
-verwendet werden soll/kann.
+Manueller Nachbau (nur falls build_exe.ps1 wirklich nicht nutzbar ist):
 
 Warum: PyInstaller baut nur fuer das Betriebssystem, auf dem es laeuft - eine
 echte Windows-.exe kann nicht von diesem Mac aus gebaut werden. Die macOS-
-Variante (onedrive-sharepoint-migration-tool, ohne Dateiendung) ist bereits
-fertig und enthaelt Python + rclone eingebettet - keine separate Installation
-mehr noetig.
+Variante (dist/onedrive-sharepoint-migration-tool.app) ist bereits fertig und
+enthaelt Python + rclone eingebettet - keine separate Installation mehr noetig.
 
-Schritte auf einem Windows-Rechner:
+Seit dem Umstieg auf ein Icon + Splash-Screen (siehe onedrive-sharepoint-
+migration-tool.spec) reicht ein einzelner "pyinstaller <flags> script.py"-
+Aufruf nicht mehr aus - Icon/Splash/console=False lassen sich nur ueber die
+.spec-Datei konfigurieren. Der manuelle Nachbau besteht deshalb nur noch aus:
 
 1. Python installieren (falls noch nicht vorhanden):
    https://www.python.org/downloads/ -> beim Installer "Add python.exe to PATH" anhaken.
 
-2. PowerShell oder cmd oeffnen, in den Ordner mit onedrive-sharepoint-migration-tool.py
-   wechseln, dann:
+2. PowerShell oder cmd oeffnen, in den Projektordner wechseln, dann:
 
-     pip install pyinstaller
+     pip install pyinstaller customtkinter
 
 3. Aktuelle rclone-Windows-Version herunterladen und entpacken:
    https://rclone.org/downloads/ -> "Windows / amd64" -> zip entpacken,
    rclone.exe in den GLEICHEN Ordner wie onedrive-sharepoint-migration-tool.py legen.
 
-4. Build starten (Windows nutzt ";" statt ":" bei --add-binary!). Ueber
-   "python -m PyInstaller" statt nur "pyinstaller" aufrufen - sonst kommt oft
-   "'pyinstaller' is not recognized", weil pip das Kommando in einen Ordner
-   installiert, der nicht automatisch im PATH liegt (z.B. .../Scripts):
+4. Build ueber die mitgelieferte .spec-Datei starten (ueber "python -m
+   PyInstaller" statt nur "pyinstaller" - sonst kommt oft "'pyinstaller' is
+   not recognized", weil pip das Kommando in einen Ordner installiert, der
+   nicht automatisch im PATH liegt):
 
-     python -m PyInstaller --onefile --console --name onedrive-sharepoint-migration-tool --add-binary "rclone.exe;." onedrive-sharepoint-migration-tool.py
+     python -m PyInstaller --noconfirm onedrive-sharepoint-migration-tool.spec
 
    Falls "python" ebenfalls nicht gefunden wird, stattdessen "py -m PyInstaller ...".
 
    Ergebnis liegt danach in: dist\onedrive-sharepoint-migration-tool.exe
-   (einzelne Datei, Python + rclone bereits eingebettet, ca. 30-40 MB).
-   Enthaelt BEIDE Werkzeuge (Kopieren/Migrieren + Duplikate finden) - beim
-   Start waehlt man per Menue, welches genutzt werden soll.
+   (einzelne Datei, Python + rclone bereits eingebettet, ca. 40-50 MB).
+   Enthaelt BEIDE Werkzeuge (Kopieren/Migrieren als GUI direkt, Duplikate
+   finden + Terminal-Oberflaeche fuer beide ueber --cli).
 
 5. dist\onedrive-sharepoint-migration-tool.exe in den gewuenschten Zielordner
    kopieren (gleicher Ordner wie onedrive-sharepoint-migration-tool.bat).
