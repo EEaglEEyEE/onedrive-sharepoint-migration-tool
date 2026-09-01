@@ -189,14 +189,18 @@ class SaveAccountScreen(ctk.CTkFrame):
             self, text="Damit steht das Konto beim nächsten Start direkt zur Auswahl,\nohne erneuten Login.",
             text_color="gray60", justify="center",
         ).pack(pady=(0, 16))
-        self.entry = ctk.CTkEntry(self, width=340, **ENTRY_STYLE)
-        self.entry.insert(0, suggested_name)
+        # textvariable statt entry.insert(): ein Insert direkt nach dem
+        # Erzeugen (vor dem ersten Redraw) blieb bei CustomTkinter teils
+        # unsichtbar, bis das Feld angeklickt wurde - eine vorbelegte
+        # StringVar wird beim ersten Zeichnen zuverlaessig uebernommen.
+        self.value_var = ctk.StringVar(value=suggested_name)
+        self.entry = ctk.CTkEntry(self, width=340, textvariable=self.value_var, **ENTRY_STYLE)
         self.entry.pack(pady=8)
-        self.entry.bind("<Return>", lambda _e: on_save(self.entry.get().strip() or suggested_name))
+        self.entry.bind("<Return>", lambda _e: on_save(self.value_var.get().strip() or suggested_name))
 
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(pady=16)
-        ctk.CTkButton(row, text="Speichern", width=150, command=lambda: on_save(self.entry.get().strip() or suggested_name)).pack(side="left", padx=6)
+        ctk.CTkButton(row, text="Speichern", width=150, command=lambda: on_save(self.value_var.get().strip() or suggested_name)).pack(side="left", padx=6)
         ctk.CTkButton(row, text="Nicht speichern", width=150, **SECONDARY_BUTTON_STYLE, command=on_skip).pack(side="left", padx=6)
 
 
@@ -401,8 +405,12 @@ class DedupeOptionsScreen(ctk.CTkFrame):
         ctk.CTkLabel(self, text="CSV-Ausgabepfad", font=ctk.CTkFont(size=13, weight="bold")).pack(pady=(20, 4))
         path_row = ctk.CTkFrame(self, fg_color="transparent")
         path_row.pack()
-        self.path_entry = ctk.CTkEntry(path_row, width=420, **ENTRY_STYLE)
-        self.path_entry.insert(0, default_output)
+        # textvariable statt entry.insert(): ein Insert direkt nach dem
+        # Erzeugen (vor dem ersten Redraw) blieb bei CustomTkinter teils
+        # unsichtbar, bis das Feld angeklickt wurde - eine vorbelegte
+        # StringVar wird beim ersten Zeichnen zuverlaessig uebernommen.
+        self.path_var = ctk.StringVar(value=default_output)
+        self.path_entry = ctk.CTkEntry(path_row, width=420, textvariable=self.path_var, **ENTRY_STYLE)
         self.path_entry.pack(side="left", padx=(0, 8))
         ctk.CTkButton(path_row, text="Durchsuchen...", width=110, **SECONDARY_BUTTON_STYLE, command=self._browse).pack(side="left")
 
@@ -418,14 +426,13 @@ class DedupeOptionsScreen(ctk.CTkFrame):
         import tkinter.filedialog as filedialog
         path = filedialog.asksaveasfilename(
             title="CSV-Ausgabepfad wählen", defaultextension=".csv", filetypes=[("CSV", "*.csv")],
-            initialfile=self.path_entry.get().split("/")[-1],
+            initialfile=self.path_var.get().split("/")[-1],
         )
         if path:
-            self.path_entry.delete(0, "end")
-            self.path_entry.insert(0, path)
+            self.path_var.set(path)
 
     def _submit(self) -> None:
-        output_path = self.path_entry.get().strip()
+        output_path = self.path_var.get().strip()
         if not output_path:
             self.error_label.configure(text="Bitte einen CSV-Ausgabepfad angeben.")
             return
