@@ -37,8 +37,27 @@ $SpecPath = Join-Path $ProjectDir "$AppName.spec"
 if (-not (Test-Path $SpecPath)) {
     Fail "Konnte '$SpecPath' nicht finden - die .spec-Datei gehoert zum Repository und sollte neben der .py liegen."
 }
-if (-not (Test-Path (Join-Path $ProjectDir "app_icon\icon.ico")) -or -not (Test-Path (Join-Path $ProjectDir "app_icon\splash.png"))) {
+$IconPath = Join-Path $ProjectDir "app_icon\icon.ico"
+$SplashPath = Join-Path $ProjectDir "app_icon\splash.png"
+if (-not (Test-Path $IconPath) -or -not (Test-Path $SplashPath)) {
     Fail "app_icon\icon.ico bzw. app_icon\splash.png fehlen - beide werden von der .spec referenziert."
+}
+
+# --- Icon/Splash-Dateigroesse anzeigen ---
+# Der Projektordner liegt auch bei dir unter OneDrive-Sync: eine Datei kann
+# dort als "nur online" markiert sein (OneDrive-Platzhalter, noch nicht
+# vollstaendig heruntergeladen) - PyInstaller wuerde dann ohne Fehlermeldung
+# eine leere/unvollstaendige Datei einlesen und die .exe bekommt einfach kein
+# Icon, statt dass der Build fehlschlaegt. icon.ico sollte ca. 24 KB gross
+# sein - deutlich kleiner (z.B. 0 KB) ist ein Hinweis genau darauf; in dem
+# Fall die Datei im Explorer einmal oeffnen (erzwingt den Download) und das
+# Skript erneut starten.
+$IconSizeKB = [math]::Round((Get-Item $IconPath).Length / 1KB, 1)
+$SplashSizeKB = [math]::Round((Get-Item $SplashPath).Length / 1KB, 1)
+Write-Host "Icon: $IconPath ($IconSizeKB KB)"
+Write-Host "Splash: $SplashPath ($SplashSizeKB KB)"
+if ($IconSizeKB -lt 5) {
+    Fail "icon.ico ist verdaechtig klein ($IconSizeKB KB, erwartet ca. 24 KB) - vermutlich eine OneDrive-Onlinedatei, die noch nicht heruntergeladen wurde. Datei im Explorer oeffnen (laedt sie vollstaendig herunter) und dieses Skript erneut starten."
 }
 
 # --- Python finden ---
@@ -122,6 +141,9 @@ $ExePath = Join-Path $ProjectDir "dist\$AppName.exe"
 if (Test-Path $ExePath) {
     Write-Host "`nFertig: $ExePath" -ForegroundColor Green
     Write-Host "Diese Datei in den Zielordner kopieren (neben onedrive-sharepoint-migration-tool.bat)."
+    Write-Host "`nFalls die .exe jetzt IMMER NOCH kein Icon zeigt (weder Datei noch Taskleiste):" -ForegroundColor Yellow
+    Write-Host "  - Explorer neu starten (Task-Manager -> Windows-Explorer -> Neu starten)"
+    Write-Host "  - Bitte melden: die 'Icon:'/'Splash:'-Zeilen von oben (Pfad + KB) mitschicken"
 }
 else {
     Fail "Build abgeschlossen, aber '$ExePath' wurde nicht gefunden - irgendetwas ist schiefgelaufen."
