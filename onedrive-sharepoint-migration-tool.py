@@ -146,9 +146,13 @@ def _resolve_work_dir() -> Path:
     if getattr(sys, "frozen", False):
         exe_path = Path(sys.executable).resolve()
         if ".app/Contents/Resources" in str(exe_path):
-            # Eingebettete Kopie im .app-Bundle - Projektordner liegt drei
+            # Eingebettete Kopie im .app-Bundle - Projektordner liegt VIER
             # Ebenen hoeher (Resources -> Contents -> .app -> Projektordner).
-            return exe_path.parent.parent.parent
+            # Nur drei Ebenen (wie hier urspruenglich) landet noch INNERHALB
+            # des .app-Bundles selbst statt daneben, wo accounts.conf liegt -
+            # accounts.conf waere dort nie gefunden worden, jeder Start haette
+            # also faelschlich sofort einen neuen Login erzwungen.
+            return exe_path.parent.parent.parent.parent
         return exe_path.parent
     return Path(__file__).resolve().parent
 
