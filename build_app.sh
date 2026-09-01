@@ -93,7 +93,10 @@ fi
 # stillschweigend geloescht werden duerfen. Die .spec-Datei selbst bleibt
 # unangetastet (Teil des Repos, kein Wegwerf-Artefakt mehr).
 rm -rf "$PROJECT_DIR/build"
-rm -f "$PROJECT_DIR/dist/$APP_NAME"
+# dist/$APP_NAME ist seit dem Umstieg auf onedir (statt onefile, siehe .spec)
+# ein ORDNER (PyInstallers COLLECT()-Ausgabe, aus der das .app-Bundle gebaut
+# wird), keine lose Datei mehr.
+rm -rf "$PROJECT_DIR/dist/$APP_NAME"
 rm -rf "$PROJECT_DIR/dist/$APP_NAME.app"
 
 # --- Build ueber die .spec-Datei (Icon + Splash-Screen + .app-Bundling) ---
@@ -107,5 +110,5 @@ APP_BUNDLE="$PROJECT_DIR/dist/$APP_NAME.app"
 
 echo ""
 echo "Fertig: $APP_BUNDLE"
-echo "Doppelklick startet die grafische Oberflaeche (mit Splash-Screen beim Laden)."
+echo "Doppelklick startet die grafische Oberflaeche (onedir-Build, startet nahezu sofort - kein Splash-Screen auf macOS, siehe .spec)."
 echo "Fuer die Terminal-Oberflaeche weiterhin onedrive-sharepoint-migration-tool.command per Doppelklick nutzen."

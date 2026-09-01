@@ -33,7 +33,18 @@ a = Analysis(  # noqa: F821
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # pyi_splash wird von PyInstaller automatisch erkannt (statischer Scan
+    # nach "import pyi_splash" in migration_gui/app.py) und mitgebuendelt -
+    # inklusive eines eigenen Runtime-Hooks, der schon beim Interpreter-Start
+    # versucht, die Splash-IPC-Verbindung aufzubauen. Auf macOS gibt es aber
+    # gar kein Splash() (siehe unten, PyInstaller-Limitierung), wodurch dieser
+    # Runtime-Hook mit einem KeyError ('_PYI_SPLASH_IPC' fehlt) crasht - das
+    # passiert VOR jeglichem eigenen Code, ein try/except in
+    # migration_gui.app._close_splash() faengt das also nicht ab. Einzig
+    # sauberer Fix: das Modul auf macOS erst gar nicht mitbuendeln, dann wird
+    # "import pyi_splash" in _close_splash() zu einem regulaeren (dort
+    # abgefangenen) ImportError.
+    excludes=["pyi_splash"] if is_macos else [],
     noarchive=False,
 )
 
@@ -68,38 +79,44 @@ exe_icon = None
 if is_windows:
     exe_icon = str(project_dir / "app_icon" / "icon.ico")
 
-exe_extra_args = [splash, splash.binaries] if splash is not None else []
-
-exe = EXE(  # noqa: F821
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    *exe_extra_args,
-    [],
-    name=app_name,
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    # macOS: console=True aendert nichts Sichtbares (Finder/.app haengt ohnehin
-    # kein Terminal an, siehe build_app.sh - bewusst unveraendert gelassen wie
-    # im bisherigen, bereits getesteten Setup). Windows: console=False nutzt
-    # das WINDOWS-PE-Subsystem statt CONSOLE, wodurch Windows GAR KEIN
-    # Konsolenfenster mehr automatisch erzeugt (nicht nur versteckt) - fuer
-    # --cli holt sich der Prozess bei Bedarf per AllocConsole() selbst eins
-    # (siehe onedrive-sharepoint-migration-tool.py, _ensure_windows_console()).
-    console=not is_windows,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    icon=exe_icon,
-)
-
 if is_macos:
-    app = BUNDLE(  # noqa: F821
+    # onedir statt onefile fuer das .app-Bundle: PyInstaller warnt selbst,
+    # dass onefile+.app "will become an error in v7.0" (nicht mit macOS'
+    # Sicherheitsmodell vereinbar) - und praktisch relevanter: onefile
+    # entpackt sich bei JEDEM Start neu in einen Temp-Ordner (die spuerbare
+    # Verzoegerung, die urspruenglich einen Splash-Screen noetig gemacht
+    # haette). Da PyInstallers Splash-Feature auf macOS ohnehin nicht
+    # verfuegbar ist (siehe oben), macht onedir die Verzoegerung stattdessen
+    # praktisch verschwinden - kein Ladebildschirm noetig statt einem, der
+    # technisch nicht gebaut werden kann. Fuer den Nutzer sichtbar aendert
+    # sich nichts: ein .app-Bundle wird in Finder/Dock immer schon als EIN
+    # Icon dargestellt, unabhaengig davon, ob intern eine Datei oder ein
+    # ganzer Ordner (Contents/Frameworks/...) dahinter liegt.
+    exe = EXE(  # noqa: F821
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name=app_name,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=True,  # Finder/.app haengt ohnehin kein Terminal an, siehe build_app.sh
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+    )
+    coll = COLLECT(  # noqa: F821
         exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        name=app_name,
+    )
+    app = BUNDLE(  # noqa: F821
+        coll,
         name=f"{app_name}.app",
         icon=str(project_dir / "app_icon" / "icon.icns"),
         bundle_identifier="de.lassners.onedrive-sharepoint-migration-tool",
@@ -110,4 +127,34 @@ if is_macos:
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
         },
+    )
+else:
+    # Windows bleibt onefile (eine einzelne .exe, kein Ordner voller Dateien)
+    # MIT Splash-Screen - dort ist beides voll unterstuetzt und die
+    # onefile-Extraktionszeit ist genau die Verzoegerung, die der Splash
+    # ueberbruecken soll.
+    exe = EXE(  # noqa: F821
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        splash,
+        splash.binaries,
+        [],
+        name=app_name,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        # console=False nutzt das WINDOWS-PE-Subsystem statt CONSOLE, wodurch
+        # Windows GAR KEIN Konsolenfenster mehr automatisch erzeugt (nicht nur
+        # versteckt) - fuer --cli holt sich der Prozess bei Bedarf per
+        # AllocConsole() selbst eins (siehe onedrive-sharepoint-migration-
+        # tool.py, _ensure_windows_console()).
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        icon=exe_icon,
     )

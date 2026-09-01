@@ -69,13 +69,18 @@ def _close_splash() -> None:
     """Schliesst PyInstallers Splash-Screen (Icon + 'Wird geladen...', siehe
     onedrive-sharepoint-migration-tool.spec), sobald das Hauptfenster steht.
     pyi_splash existiert nur in einer gefrorenen Binary MIT aktiviertem
-    Splash-Feature - beim Start aus dem Quellcode (kein PyInstaller) oder
-    einer ohne Splash gebauten Binary ist das ein No-Op."""
+    Splash-Feature - beim Start aus dem Quellcode (kein PyInstaller) ist das
+    ein No-Op (ImportError). Auf macOS wird pyi_splash trotzdem mitgebuendelt
+    (PyInstaller erkennt das import pyi_splash statisch, obwohl die .spec dort
+    bewusst KEIN Splash() konfiguriert, da nicht von macOS unterstuetzt) - der
+    Modul-Import selbst schlaegt dann mit einem KeyError fehl (fehlende
+    _PYI_SPLASH_IPC-Umgebungsvariable), nicht mit ImportError, deshalb hier
+    bewusst breiter gefangen."""
     try:
         import pyi_splash
-    except ImportError:
+        pyi_splash.close()
+    except Exception:  # noqa: BLE001 - siehe Docstring: kann KeyError statt ImportError sein
         return
-    pyi_splash.close()
 
 
 class App(ctk.CTk):
