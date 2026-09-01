@@ -489,12 +489,31 @@ def rclone_authorize_onedrive(env: dict, label: str) -> str:
     return output.split(marker_start, 1)[1].split(marker_end, 1)[0].strip()
 
 
-def graph_get(url: str, token_json: str, ca_cert_bundle: str | None) -> dict:
-    access_token = json.loads(token_json)["access_token"]
+def _graph_fetch(url: str, access_token: str, ca_cert_bundle: str | None, retries: int = 3) -> dict:
+    """Fuehrt einen einzelnen Microsoft-Graph-GET-Aufruf aus, mit ein paar
+    automatischen Wiederholungen bei transienten Netzwerkfehlern (Timeout,
+    Verbindungsabbruch) - kommt vor allem bei langsamen/gefilterten
+    Firmennetzwerken vor und liess bisher das ganze Programm mit einem rohen
+    Python-Traceback abstuerzen statt es freundlich zu melden oder einfach
+    nochmal zu versuchen. Wirft nach Ausschoepfen der Versuche den letzten
+    Fehler weiter (Aufrufer faengt TimeoutError/URLError weiterhin ab)."""
     context = ssl.create_default_context(cafile=ca_cert_bundle) if ca_cert_bundle else None
     request = urllib.request.Request(url, headers={"Authorization": f"Bearer {access_token}"})
-    with urllib.request.urlopen(request, timeout=15, context=context) as response:
-        return json.loads(response.read())
+    last_exc: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=30, context=context) as response:
+                return json.loads(response.read())
+        except (TimeoutError, urllib.error.URLError) as exc:
+            last_exc = exc
+            if attempt < retries:
+                print(f"Microsoft-Graph-Anfrage fehlgeschlagen ({exc}) - Versuch {attempt}/{retries}, erneuter Versuch...")
+    raise last_exc
+
+
+def graph_get(url: str, token_json: str, ca_cert_bundle: str | None) -> dict:
+    access_token = json.loads(token_json)["access_token"]
+    return _graph_fetch(url, access_token, ca_cert_bundle)
 
 
 def fetch_own_drive(token_json: str, ca_cert_bundle: str | None) -> tuple[str, str, str]:
@@ -532,15 +551,12 @@ def list_root_items(token_json: str, drive_id: str, ca_cert_bundle: str | None) 
     das ueber die Besitzer-Drive-ID, die in remoteItem.sharepointIds.siteUrl
     steckt (".../personal/<driveId>")."""
     access_token = json.loads(token_json)["access_token"]
-    context = ssl.create_default_context(cafile=ca_cert_bundle) if ca_cert_bundle else None
     own_drive_id_lower = drive_id.lower()
     site_url_re = re.compile(r"/personal/([0-9a-zA-Z]+)")
     url = f"{GRAPH_ROOT}/drives/{drive_id}/root/children?$select=name,folder,remoteItem&$top=200"
     items: list[dict] = []
     while url:
-        request = urllib.request.Request(url, headers={"Authorization": f"Bearer {access_token}"})
-        with urllib.request.urlopen(request, timeout=15, context=context) as response:
-            page = json.loads(response.read())
+        page = _graph_fetch(url, access_token, ca_cert_bundle)
         for item in page.get("value", []):
             remote = item.get("remoteItem")
             is_foreign = False
@@ -618,7 +634,7 @@ def prompt_site_selection(token_json: str, ca_cert_bundle: str | None) -> dict:
         ).strip()
         try:
             sites = search_sharepoint_sites(query, token_json, ca_cert_bundle)
-        except (urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
+        except (TimeoutError, urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
             print(f"Suche fehlgeschlagen: {exc}")
             continue
 
@@ -794,7 +810,7 @@ def resolve_endpoint(env: dict, label: str, ca_cert_bundle: str | None, config_p
             "identity": f"SharePoint-Site '{site_name}' ({site.get('webUrl', '')})",
             "account_name": account_name,
         }
-    except (urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
+    except (TimeoutError, urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
         print(f"\nKonnte {label} nicht ueber Microsoft Graph aufloesen: {exc}")
         config_path.unlink(missing_ok=True)
         sys.exit(1)
@@ -959,7 +975,7 @@ def run_copy_tool(args, env: dict, config_path: Path, log_file: Path) -> int:
         print("\nErmittle Inhalt der Quelle...")
         try:
             root_items = list_root_items(source_info["token"], source_info["drive_id"], args.ca_cert_bundle)
-        except (urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
+        except (TimeoutError, urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
             print(f"\nKonnte Ordnerliste nicht ermitteln: {exc}")
             config_path.unlink(missing_ok=True)
             return 1
@@ -1287,7 +1303,7 @@ def run_dedupe_tool(args, env: dict, config_path: Path, timestamp: str) -> int:
     print("\nErmittle Inhalt des Kontos...")
     try:
         root_items = list_root_items(scan_info["token"], scan_info["drive_id"], args.ca_cert_bundle)
-    except (urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
+    except (TimeoutError, urllib.error.URLError, KeyError, json.JSONDecodeError) as exc:
         print(f"\nKonnte Ordnerliste nicht ermitteln: {exc}")
         config_path.unlink(missing_ok=True)
         return 1
