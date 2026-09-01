@@ -1,12 +1,16 @@
 @echo off
-REM Doppelklick-Starter fuer Windows: oeffnet ein Konsolenfenster und fuehrt
-REM das Script darin aus (Explorer fuehrt .bat-Dateien so per Doppelklick aus).
-REM Wenn dist\onedrive-sharepoint-migration-tool.exe existiert - eine mit
+REM Doppelklick-Starter fuer Windows - startet standardmaessig die GRAFISCHE
+REM Oberflaeche (kein Argument = GUI). Fuer die Terminal-Oberflaeche (CLI)
+REM stattdessen "onedrive-sharepoint-migration-tool.exe --cli" bzw. diese
+REM .bat-Datei mit --cli als Argument aufrufen. Wenn
+REM dist\onedrive-sharepoint-migration-tool.exe existiert - eine mit
 REM PyInstaller gebaute, eigenstaendige Binary mit Python UND rclone bereits
 REM eingebettet - wird die direkt verwendet, kein separates Python/winget/
 REM rclone-Setup mehr noetig. Build-Ausgaben liegen immer unter dist/, nie
 REM direkt im Projektordner (siehe build_exe.ps1). Sonst wie gewohnt Fallback
-REM auf py/python (mit Auto-Install).
+REM auf py/python (mit Auto-Install). Im GUI-Modus blendet die Binary ihr
+REM eigenes Konsolenfenster selbststaendig aus (siehe onedrive-sharepoint-
+REM migration-tool.py) - im --cli-Modus bleibt es sichtbar.
 cd /d "%~dp0"
 
 if exist "dist\onedrive-sharepoint-migration-tool.exe" (

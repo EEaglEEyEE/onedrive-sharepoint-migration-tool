@@ -1,12 +1,16 @@
 # OneDrive/SharePoint Migration Tool
 
-A small interactive command-line tool for two related tasks around
-[rclone](https://rclone.org/) and OneDrive/SharePoint, without relying on
-rclone's built-in drive-discovery (which fails for OneDrive Personal
-accounts):
+A small interactive tool for two related tasks around [rclone](https://rclone.org/)
+and OneDrive/SharePoint, without relying on rclone's built-in drive-discovery
+(which fails for OneDrive Personal accounts):
 
 1. **Copy/migrate** files between OneDrive accounts and/or SharePoint sites
 2. **Find duplicates** across the entire tree of a single account
+
+By default the tool starts a small graphical interface (currently: tool 1,
+Copy/migrate — tool 2 is marked there as "CLI only for now"). Pass `--cli` to
+get the original terminal interface instead, with both tools available. Both
+interfaces share the exact same underlying logic (`migration_core.py`).
 
 > Note: the interactive prompts and log messages are currently in **German**
 > (the tool was originally written for personal/family use). The logic itself
@@ -106,13 +110,17 @@ for review.
 ## Requirements
 
 - [rclone](https://rclone.org/downloads/)
-- Python 3.10+ (only if running the `.py` script directly — the packaged
-  binary below has no dependencies at all)
+- Python 3.10+ with a working `tkinter` (only if running the `.py` script
+  directly — the packaged binary below has no dependencies at all).
+  Homebrew's Python on macOS does **not** ship `tkinter`; use the official
+  python.org installer or `brew install python-tk` instead. `pip install
+  customtkinter` is also needed for the GUI.
 
 ## Usage
 
 ```
-python3 onedrive-sharepoint-migration-tool.py
+python3 onedrive-sharepoint-migration-tool.py                 # GUI (default)
+python3 onedrive-sharepoint-migration-tool.py --cli            # terminal, both tools
 python3 onedrive-sharepoint-migration-tool.py --ca-cert-bundle /path/to/corporate-ca-bundle.pem
 ```
 
@@ -123,39 +131,51 @@ proxy/firewall (Cato, Zscaler, etc.) and haven't set up a bypass rule for
 
 ### Double-click launchers
 
-Both launchers expect the packaged binary under `dist/` (see Packaging below)
-— that's where PyInstaller puts its output by default, and `build_exe.ps1`
-follows the same convention.
+All launchers expect the packaged binary under `dist/` (see Packaging below)
+— that's where PyInstaller puts its output by default, and `build_exe.ps1`/
+`build_app.sh` follow the same convention.
 
-- **macOS**: `onedrive-sharepoint-migration-tool.command` — runs
-  `dist/onedrive-sharepoint-migration-tool`.
+- **macOS, GUI**: `dist/onedrive-sharepoint-migration-tool.app` — double-click
+  like any other app.
+- **macOS, terminal**: `onedrive-sharepoint-migration-tool.command` — runs
+  `dist/onedrive-sharepoint-migration-tool --cli` in a Terminal window.
 - **Windows**: `onedrive-sharepoint-migration-tool.bat` — runs
-  `dist\onedrive-sharepoint-migration-tool.exe` if present, otherwise falls
-  back to `py`/`python` directly on the `.py` script, auto-installing Python
-  via `winget` if missing.
+  `dist\onedrive-sharepoint-migration-tool.exe` (GUI by default) if present,
+  otherwise falls back to `py`/`python` directly on the `.py` script,
+  auto-installing Python via `winget` if missing. Pass `--cli` as an argument
+  for the terminal interface instead.
 
 ## Packaging as a single self-contained binary
 
-The script can be bundled with Python *and* rclone into one standalone
-executable via [PyInstaller](https://pyinstaller.org/), so end users need
-nothing pre-installed:
+The script can be bundled with Python, customtkinter, *and* rclone into one
+standalone executable via [PyInstaller](https://pyinstaller.org/), so end
+users need nothing pre-installed:
 
 ```bash
-pip install pyinstaller
+pip install pyinstaller customtkinter
 # place a matching rclone binary next to onedrive-sharepoint-migration-tool.py first
 
 # macOS/Linux:
-pyinstaller --onefile --console --name onedrive-sharepoint-migration-tool --add-binary "rclone:." onedrive-sharepoint-migration-tool.py
+pyinstaller --onefile --console --name onedrive-sharepoint-migration-tool --add-binary "rclone:." --collect-data customtkinter onedrive-sharepoint-migration-tool.py
 
 # Windows (note the ";" instead of ":"):
-pyinstaller --onefile --console --name onedrive-sharepoint-migration-tool --add-binary "rclone.exe;." onedrive-sharepoint-migration-tool.py
+pyinstaller --onefile --console --name onedrive-sharepoint-migration-tool --add-binary "rclone.exe;." --collect-data customtkinter onedrive-sharepoint-migration-tool.py
 ```
 
-See [BUILD_WINDOWS.txt](BUILD_WINDOWS.txt) for detailed step-by-step Windows
-build instructions, or just run [build_exe.ps1](build_exe.ps1) in PowerShell
-on a Windows machine — it automates all of the steps, including downloading
-rclone.exe if it's not already next to the script. PyInstaller can only build
-for the OS it runs on, so the Windows executable must be built on Windows.
+The binary is intentionally still a `--console` build on both platforms (no
+separate `--windowed` variant to maintain): in GUI mode it hides its own
+console window at startup on Windows, and on macOS it's wrapped in a plain
+`.app` bundle with no Terminal involved — `--cli` mode uses the same console
+normally.
+
+Run [build_app.sh](build_app.sh) (macOS) or [build_exe.ps1](build_exe.ps1)
+(Windows) to automate all of the steps above, including downloading a
+matching rclone binary if it's not already next to the script, and — for
+`build_app.sh` — assembling the `.app` bundle. See
+[BUILD_WINDOWS.txt](BUILD_WINDOWS.txt) for detailed step-by-step Windows
+build instructions if you'd rather not use the script. PyInstaller can only
+build for the OS it runs on, so each platform's binary must be built on that
+platform.
 
 ## Logs & data
 

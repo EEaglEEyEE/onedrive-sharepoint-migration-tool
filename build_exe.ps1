@@ -45,11 +45,17 @@ if (-not $PythonCmd) {
 }
 Write-Host "Verwende Python: $PythonCmd"
 
-# --- PyInstaller installieren/aktualisieren ---
-Write-Host "`nInstalliere/aktualisiere PyInstaller..."
-& $PythonCmd -m pip install --quiet --upgrade pyinstaller
+# --- tkinter-Verfuegbarkeit pruefen (Voraussetzung fuer die GUI) ---
+& $PythonCmd -c "import tkinter" 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Fail "'pip install pyinstaller' fehlgeschlagen (Exit Code $LASTEXITCODE)."
+    Fail "Das gefundene Python ($PythonCmd) hat kein funktionierendes tkinter (fuer die GUI benoetigt). Bitte die offizielle Python-Installation von https://www.python.org/downloads/ verwenden (bringt tkinter von Haus aus mit) und dieses Skript erneut ausfuehren."
+}
+
+# --- PyInstaller + customtkinter installieren/aktualisieren ---
+Write-Host "`nInstalliere/aktualisiere PyInstaller und customtkinter..."
+& $PythonCmd -m pip install --quiet --upgrade pyinstaller customtkinter
+if ($LASTEXITCODE -ne 0) {
+    Fail "'pip install pyinstaller customtkinter' fehlgeschlagen (Exit Code $LASTEXITCODE)."
 }
 
 # --- rclone.exe sicherstellen ---
@@ -90,7 +96,7 @@ Remove-Item (Join-Path $ProjectDir "*.spec") -Force -ErrorAction SilentlyContinu
 Write-Host "`nBaue onedrive-sharepoint-migration-tool.exe (kann ein bis zwei Minuten dauern)..."
 Push-Location $ProjectDir
 try {
-    & $PythonCmd -m PyInstaller --onefile --console --name onedrive-sharepoint-migration-tool --add-binary "rclone.exe;." $ScriptName
+    & $PythonCmd -m PyInstaller --onefile --console --name onedrive-sharepoint-migration-tool --add-binary "rclone.exe;." --collect-data customtkinter $ScriptName
     if ($LASTEXITCODE -ne 0) {
         Fail "PyInstaller-Build fehlgeschlagen (Exit Code $LASTEXITCODE)."
     }
