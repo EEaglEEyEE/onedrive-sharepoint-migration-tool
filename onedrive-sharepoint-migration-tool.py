@@ -9,15 +9,17 @@ Fragt beim Start, welches der beiden Werkzeuge genutzt werden soll, danach je
 nach Werkzeug weitere Fragen (siehe unten).
 
 --- Konten dauerhaft speichern ---
-Bei jedem Login (Quelle/Ziel/zu durchsuchendes Konto) wird zuerst gefragt, ob
-ein BEREITS GESPEICHERTES Konto verwendet werden soll (kein erneuter Login
-noetig - rclone erneuert das Token automatisch im Hintergrund) oder ob eine
-NEUE Anmeldung erfolgen soll. Nach einer neuen Anmeldung wird ein Name dafuer
-vorgeschlagen (z.B. "Jane Doe (Personal)") und das Konto - falls
-gewuenscht - dauerhaft in accounts.conf gespeichert, damit es beim naechsten
-Start direkt ausgewaehlt werden kann. accounts.conf enthaelt langlebige
-Zugangsdaten und wird NIE ins Git-Repo committet (siehe .gitignore) und mit
-restriktiven Dateirechten (nur Besitzer) angelegt.
+Bei jedem Endpunkt (Quelle/Ziel/zu durchsuchendes Konto) wird ZUERST gefragt,
+ob es sich um OneDrive, eine SharePoint-Site oder einen lokalen Pfad/ein
+Netzlaufwerk handelt. Bei OneDrive/SharePoint werden DANACH nur die dazu
+passenden BEREITS GESPEICHERTEN Konten angeboten (kein erneuter Login
+noetig - rclone erneuert das Token automatisch im Hintergrund), oder eine
+NEUE Anmeldung. Nach einer neuen Anmeldung wird ein Name dafuer vorgeschlagen
+(z.B. "Jane Doe (Personal)") und das Konto - falls gewuenscht - dauerhaft in
+accounts.conf gespeichert, damit es beim naechsten Start direkt ausgewaehlt
+werden kann. accounts.conf enthaelt langlebige Zugangsdaten und wird NIE ins
+Git-Repo committet (siehe .gitignore) und mit restriktiven Dateirechten (nur
+Besitzer) angelegt.
 Sollte ein gespeichertes Konto nicht mehr funktionieren (z.B. "HTTP Error
 401: Unauthorized", weil der Refresh-Token ungueltig geworden ist - etwa nach
 Passwortaenderung oder laengerer Inaktivitaet), steht bei der Kontoauswahl
@@ -388,13 +390,24 @@ def prompt_reauth_target(accounts: list[str]) -> str | None:
         print("Nummer ausserhalb des Bereichs.")
 
 
-def prompt_account_choice(label: str, env: dict) -> str | None:
-    """Zeigt gespeicherte Konten zur Auswahl plus 'neue Anmeldung' und
-    'bestehendes Konto neu anmelden' (falls z.B. der Refresh-Token
-    ungueltig geworden ist). Gibt den Namen des gewaehlten gespeicherten
-    Kontos zurueck, oder None fuer eine neue Anmeldung."""
+def account_kind(account: dict) -> str:
+    """Leitet aus dem gespeicherten drive_type ab, ob ein Konto ein
+    OneDrive- oder ein SharePoint-Konto ist - dieselbe Regel wie ueberall
+    sonst im Programm (documentLibrary = SharePoint, alles andere OneDrive)."""
+    return "sharepoint" if account.get("drive_type") == "documentLibrary" else "onedrive"
+
+
+def prompt_account_choice(label: str, env: dict, kind_filter: str) -> str | None:
+    """Zeigt nur die gespeicherten Konten des passenden Typs (OneDrive ODER
+    SharePoint, je nach vorher gewaehltem Endpunkt-Typ) zur Auswahl, plus
+    'neue Anmeldung' und 'bestehendes Konto neu anmelden' (falls z.B. der
+    Refresh-Token ungueltig geworden ist). Gibt den Namen des gewaehlten
+    gespeicherten Kontos zurueck, oder None fuer eine neue Anmeldung."""
     while True:
-        accounts = list_saved_accounts()
+        accounts = [
+            name for name in list_saved_accounts()
+            if account_kind(load_saved_account(name)) == kind_filter
+        ]
         if not accounts:
             return None
 
@@ -711,13 +724,23 @@ def list_local_root_items(path: str) -> list[dict]:
 
 
 def resolve_endpoint(env: dict, label: str, ca_cert_bundle: str | None, config_path: Path) -> dict:
-    """Fragt zuerst, ob ein gespeichertes Konto verwendet werden soll; sonst
-    fragt sie ab, ob dieser Endpunkt ein OneDrive-Account oder eine
-    SharePoint-Site ist, fuehrt den passenden Login durch und bietet an, das
-    neue Konto dauerhaft zu speichern. Liefert immer Token/Drive-ID/-Typ plus
-    einen menschenlesbaren Bezeichner und (falls gespeichert) den Kontonamen
-    zurueck."""
-    chosen = prompt_account_choice(label, env)
+    """Fragt zuerst ab, ob dieser Endpunkt OneDrive, eine SharePoint-Site oder
+    ein lokaler Pfad/Netzlaufwerk ist. Bei OneDrive/SharePoint werden danach
+    NUR die dazu passenden gespeicherten Konten angeboten; sonst erfolgt ein
+    frischer Login mit Angebot, das neue Konto dauerhaft zu speichern.
+    Liefert immer einen menschenlesbaren Bezeichner und (falls gespeichert
+    bzw. lokal) den Kontonamen/Pfad zurueck."""
+    endpoint_type = prompt_endpoint_type(label)
+    if endpoint_type == "local":
+        path = prompt_local_path(label)
+        return {
+            "kind": "local",
+            "path": path,
+            "identity": f"Lokal/Netzlaufwerk ({path})",
+            "account_name": None,
+        }
+
+    chosen = prompt_account_choice(label, env, endpoint_type)
     if chosen is not None:
         account = load_saved_account(chosen)
         drive_type = account.get("drive_type", "")
@@ -730,16 +753,6 @@ def resolve_endpoint(env: dict, label: str, ca_cert_bundle: str | None, config_p
             "kind": kind,
             "identity": chosen,
             "account_name": chosen,
-        }
-
-    endpoint_type = prompt_endpoint_type(label)
-    if endpoint_type == "local":
-        path = prompt_local_path(label)
-        return {
-            "kind": "local",
-            "path": path,
-            "identity": f"Lokal/Netzlaufwerk ({path})",
-            "account_name": None,
         }
 
     type_label = "OneDrive" if endpoint_type == "onedrive" else "SharePoint"

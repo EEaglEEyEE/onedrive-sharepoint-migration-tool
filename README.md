@@ -14,13 +14,15 @@ accounts):
 
 ## What it does
 
-At startup you choose which of the two tools to use. Each login (source,
-target, or the account to scan for duplicates) first offers any **previously
-saved accounts** to pick from — no need to log in again, the tool refreshes
-the token automatically before using it — or the option to log in fresh.
-After a fresh login you can optionally save the account under a name (e.g.
-`Jane Doe (Personal)`) so it shows up next time. If a saved account's token
-has stopped working entirely (e.g. `HTTP Error 401: Unauthorized` after a
+At startup you choose which of the two tools to use. Each endpoint (source,
+target, or the account to scan for duplicates) first asks what kind it is —
+OneDrive, a SharePoint site, or a local path/network drive. For OneDrive or
+SharePoint, it then offers any **previously saved accounts of that type**
+to pick from — no need to log in again, the tool refreshes the token
+automatically before using it — or the option to log in fresh. After a
+fresh login you can optionally save the account under a name (e.g. `Jane
+Doe (Personal)`) so it shows up next time. If a saved account's token has
+stopped working entirely (e.g. `HTTP Error 401: Unauthorized` after a
 password change or long inactivity), the account picker also offers
 **"Bestehendes Konto neu anmelden"** (re-authenticate an existing account) —
 it replaces just the token, keeping the saved name and drive ID. Saved
