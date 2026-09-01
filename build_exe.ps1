@@ -6,9 +6,11 @@
       1. Python pruefen
       2. PyInstaller installieren/aktualisieren
       3. rclone.exe besorgen (automatischer Download, falls nicht schon vorhanden)
-      4. Build starten (Python + rclone werden in eine einzelne .exe eingebettet)
-    Muss im selben Ordner wie onedrive-sharepoint-migration-tool.py liegen, oder
-    per -ScriptPath auf die .py zeigen.
+      4. Build ueber onedrive-sharepoint-migration-tool.spec (Icon + Splash-Screen
+         + console=False, siehe dort - Python/rclone landen dabei weiterhin in
+         einer einzelnen .exe)
+    Muss im selben Ordner wie onedrive-sharepoint-migration-tool.py/.spec liegen,
+    oder per -ScriptPath auf die .py zeigen.
 .EXAMPLE
     .\build_exe.ps1
 .EXAMPLE
@@ -30,7 +32,14 @@ if (-not (Test-Path $ScriptPath)) {
     Fail "Konnte '$ScriptPath' nicht finden. Mit -ScriptPath auf den Pfad zur .py-Datei zeigen."
 }
 $ProjectDir = Split-Path -Parent (Resolve-Path $ScriptPath)
-$ScriptName = Split-Path -Leaf $ScriptPath
+$AppName = "onedrive-sharepoint-migration-tool"
+$SpecPath = Join-Path $ProjectDir "$AppName.spec"
+if (-not (Test-Path $SpecPath)) {
+    Fail "Konnte '$SpecPath' nicht finden - die .spec-Datei gehoert zum Repository und sollte neben der .py liegen."
+}
+if (-not (Test-Path (Join-Path $ProjectDir "app_icon\icon.ico")) -or -not (Test-Path (Join-Path $ProjectDir "app_icon\splash.png"))) {
+    Fail "app_icon\icon.ico bzw. app_icon\splash.png fehlen - beide werden von der .spec referenziert."
+}
 
 # --- Python finden ---
 $PythonCmd = $null
@@ -87,16 +96,20 @@ else {
 }
 
 # --- Alte Build-Artefakte aufraeumen ---
-foreach ($dir in @("build", "dist")) {
-    Remove-Item (Join-Path $ProjectDir $dir) -Recurse -Force -ErrorAction SilentlyContinue
-}
-Remove-Item (Join-Path $ProjectDir "*.spec") -Force -ErrorAction SilentlyContinue
+# Bewusst NUR die eigenen Build-Ausgaben (build-Ordner/die .exe selbst)
+# entfernen, NIE den ganzen dist-Ordner - dort koennen accounts.conf
+# (dauerhaft gespeicherte Konten) sowie transiente Lauf-Configs eines evtl.
+# gerade laufenden Kopiervorgangs liegen, die nicht stillschweigend geloescht
+# werden duerfen. Die .spec-Datei selbst bleibt unangetastet (Teil des Repos,
+# kein Wegwerf-Artefakt mehr).
+Remove-Item (Join-Path $ProjectDir "build") -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $ProjectDir "dist\$AppName.exe") -Force -ErrorAction SilentlyContinue
 
-# --- Build ---
-Write-Host "`nBaue onedrive-sharepoint-migration-tool.exe (kann ein bis zwei Minuten dauern)..."
+# --- Build ueber die .spec-Datei (Icon + Splash-Screen + console=False) ---
+Write-Host "`nBaue $AppName.exe (kann ein bis zwei Minuten dauern)..."
 Push-Location $ProjectDir
 try {
-    & $PythonCmd -m PyInstaller --onefile --console --name onedrive-sharepoint-migration-tool --add-binary "rclone.exe;." --collect-data customtkinter $ScriptName
+    & $PythonCmd -m PyInstaller --noconfirm $SpecPath
     if ($LASTEXITCODE -ne 0) {
         Fail "PyInstaller-Build fehlgeschlagen (Exit Code $LASTEXITCODE)."
     }
@@ -105,7 +118,7 @@ finally {
     Pop-Location
 }
 
-$ExePath = Join-Path $ProjectDir "dist\onedrive-sharepoint-migration-tool.exe"
+$ExePath = Join-Path $ProjectDir "dist\$AppName.exe"
 if (Test-Path $ExePath) {
     Write-Host "`nFertig: $ExePath" -ForegroundColor Green
     Write-Host "Diese Datei in den Zielordner kopieren (neben onedrive-sharepoint-migration-tool.bat)."

@@ -115,18 +115,25 @@ from migration_core import TRANSFERS, CHECKERS
 _DEFAULT_CA_CERT_BUNDLE = Path.home() / "combined-ca-bundle.pem"
 
 
-def _hide_windows_console() -> None:
-    """Blendet das Konsolenfenster im GUI-Modus unter Windows aus. Die Binary
-    wird bewusst weiterhin als --console-Build erzeugt (kein zweiter,
-    separater --windowed-Build, siehe Plan) - im --cli-Modus bleibt das
-    Fenster sichtbar, im GUI-Modus wird es hier per WinAPI versteckt, statt
-    ein eigenes PyInstaller-Artefakt dafuer zu pflegen."""
+def _ensure_windows_console() -> None:
+    """Sorgt unter Windows dafuer, dass ein Konsolenfenster fuer --cli
+    existiert. Die Binary wird bewusst mit console=False (WINDOWS- statt
+    CONSOLE-Subsystem, siehe onedrive-sharepoint-migration-tool.spec)
+    gebaut - dadurch entsteht beim GUI-Start (kein --cli) ueberhaupt kein
+    Konsolenfenster mehr (nicht nur kurz sichtbar und dann versteckt wie in
+    einer frueheren Version), aber --cli braucht fuer print()/input()
+    trotzdem eins. AllocConsole() legt bei Bedarf eins an; existiert schon
+    eines (z.B. bei einem reinen Konsolen-Build), passiert nichts."""
     import ctypes
+    import sys
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    user32 = ctypes.WinDLL("user32", use_last_error=True)
-    hwnd = kernel32.GetConsoleWindow()
-    if hwnd:
-        user32.ShowWindow(hwnd, 0)  # SW_HIDE
+    if kernel32.GetConsoleWindow():
+        return
+    if not kernel32.AllocConsole():
+        return
+    sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+    sys.stderr = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+    sys.stdin = open("CONIN$", "r", encoding="utf-8", errors="replace")
 
 
 def main() -> None:
@@ -151,11 +158,11 @@ def main() -> None:
         args.ca_cert_bundle = str(_DEFAULT_CA_CERT_BUNDLE)
 
     if args.cli:
+        if platform.system() == "Windows":
+            _ensure_windows_console()
         import migration_cli
         migration_cli.main(args)
     else:
-        if platform.system() == "Windows":
-            _hide_windows_console()
         import migration_gui
         migration_gui.main(args)
 

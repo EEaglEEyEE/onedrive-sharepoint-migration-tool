@@ -1,13 +1,14 @@
 #!/bin/bash
 # Baut onedrive-sharepoint-migration-tool.app (macOS) per PyInstaller - das
 # macOS-Aequivalent zu build_exe.ps1 (Windows). Prueft Voraussetzungen, holt
-# eine passende rclone-Binary bei Bedarf, baut eine einzelne --console-Binary
-# mit eingebettetem Python + rclone und packt sie in ein einfaches
-# .app-Bundle. KEIN AppleScript-Terminal-Trampolin mehr (fruehere Versionen
-# oeffneten dafuer extra ein Terminal-Fenster) - die GUI braucht kein TTY,
-# Contents/MacOS/<name> ist direkt die gebaute Binary. Fuer die
-# Terminal-Oberflaeche (CLI) weiterhin onedrive-sharepoint-migration-
-# tool.command nutzen, das dieselbe Binary mit --cli aufruft.
+# eine passende rclone-Binary bei Bedarf und baut ueber die mitgelieferte
+# onedrive-sharepoint-migration-tool.spec (siehe dort) - die .spec regelt
+# Icon, Splash-Screen und das .app-Bundling (PyInstallers BUNDLE()) in einem
+# Rutsch, statt das Bundle hier von Hand zusammenzusetzen. KEIN AppleScript-
+# Terminal-Trampolin (fruehere Versionen oeffneten dafuer extra ein Terminal-
+# Fenster) - die GUI braucht kein TTY. Fuer die Terminal-Oberflaeche (CLI)
+# weiterhin onedrive-sharepoint-migration-tool.command nutzen, das dieselbe
+# Binary mit --cli aufruft.
 #
 # Muss im Projektordner liegen (oder per --script-path auf die .py zeigen).
 #
@@ -25,9 +26,13 @@ fail() { echo "$1" >&2; exit 1; }
 
 [[ -f "$SCRIPT_PATH" ]] || fail "Konnte '$SCRIPT_PATH' nicht finden. Mit --script-path <pfad> auf die .py-Datei zeigen."
 PROJECT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-SCRIPT_NAME="$(basename "$SCRIPT_PATH")"
 APP_NAME="onedrive-sharepoint-migration-tool"
+SPEC_PATH="$PROJECT_DIR/$APP_NAME.spec"
 cd "$PROJECT_DIR"
+
+[[ -f "$SPEC_PATH" ]] || fail "Konnte '$SPEC_PATH' nicht finden - die .spec-Datei gehoert zum Repository und sollte neben der .py liegen."
+[[ -f "$PROJECT_DIR/app_icon/icon.icns" && -f "$PROJECT_DIR/app_icon/splash.png" ]] \
+    || fail "app_icon/icon.icns bzw. app_icon/splash.png fehlen - beide werden von der .spec referenziert."
 
 # --- Python finden ---
 PYTHON_CMD=""
@@ -81,63 +86,26 @@ else
 fi
 
 # --- Alte Build-Artefakte aufraeumen ---
-# Bewusst NUR die eigenen Build-Ausgaben (Binary/.app/PyInstaller-build-Ordner/
-# *.spec) entfernen, NIE den ganzen dist/-Ordner - dort liegen accounts.conf
+# Bewusst NUR die eigenen Build-Ausgaben (Binary/.app/PyInstaller-build-
+# Ordner) entfernen, NIE den ganzen dist/-Ordner - dort liegen accounts.conf
 # (dauerhaft gespeicherte Konten der ganzen Familie) sowie transiente
 # Lauf-Configs eines evtl. gerade laufenden Kopiervorgangs, die nicht
-# stillschweigend geloescht werden duerfen.
-rm -rf "$PROJECT_DIR/build" "$PROJECT_DIR"/*.spec
+# stillschweigend geloescht werden duerfen. Die .spec-Datei selbst bleibt
+# unangetastet (Teil des Repos, kein Wegwerf-Artefakt mehr).
+rm -rf "$PROJECT_DIR/build"
 rm -f "$PROJECT_DIR/dist/$APP_NAME"
 rm -rf "$PROJECT_DIR/dist/$APP_NAME.app"
 
-# --- Build der eigenstaendigen Binary ---
+# --- Build ueber die .spec-Datei (Icon + Splash-Screen + .app-Bundling) ---
 echo ""
 echo "Baue $APP_NAME (kann ein bis zwei Minuten dauern)..."
-"$PYTHON_CMD" -m PyInstaller --onefile --console --name "$APP_NAME" \
-    --add-binary "rclone:." --collect-data customtkinter "$SCRIPT_NAME" \
+"$PYTHON_CMD" -m PyInstaller --noconfirm "$SPEC_PATH" \
     || fail "PyInstaller-Build fehlgeschlagen."
 
-BIN_PATH="$PROJECT_DIR/dist/$APP_NAME"
-[[ -f "$BIN_PATH" ]] || fail "Build abgeschlossen, aber '$BIN_PATH' wurde nicht gefunden - irgendetwas ist schiefgelaufen."
-
-# --- .app-Bundle zusammensetzen (ohne Terminal-Trampolin, siehe oben) ---
 APP_BUNDLE="$PROJECT_DIR/dist/$APP_NAME.app"
-mkdir -p "$APP_BUNDLE/Contents/MacOS"
-cp "$BIN_PATH" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
-chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
-
-cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key>
-    <string>$APP_NAME</string>
-    <key>CFBundleDisplayName</key>
-    <string>OneDrive/SharePoint Migration Tool</string>
-    <key>CFBundleIdentifier</key>
-    <string>de.lassners.$APP_NAME</string>
-    <key>CFBundleVersion</key>
-    <string>1.0.0</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
-    <key>CFBundleExecutable</key>
-    <string>$APP_NAME</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>LSUIElement</key>
-    <false/>
-</dict>
-</plist>
-PLIST
+[[ -d "$APP_BUNDLE" ]] || fail "Build abgeschlossen, aber '$APP_BUNDLE' wurde nicht gefunden - irgendetwas ist schiefgelaufen."
 
 echo ""
 echo "Fertig: $APP_BUNDLE"
-echo "Doppelklick startet die grafische Oberflaeche. Fuer die Terminal-Oberflaeche"
-echo "weiterhin onedrive-sharepoint-migration-tool.command per Doppelklick nutzen."
+echo "Doppelklick startet die grafische Oberflaeche (mit Splash-Screen beim Laden)."
+echo "Fuer die Terminal-Oberflaeche weiterhin onedrive-sharepoint-migration-tool.command per Doppelklick nutzen."

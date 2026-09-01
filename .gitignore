@@ -1,6 +1,7 @@
 build/
 dist/
 *.spec
+!onedrive-sharepoint-migration-tool.spec
 __pycache__/
 *.pyc
 .DS_Store

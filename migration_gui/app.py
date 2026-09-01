@@ -65,6 +65,19 @@ ctk.set_appearance_mode("system")
 ctk.set_default_color_theme("blue")
 
 
+def _close_splash() -> None:
+    """Schliesst PyInstallers Splash-Screen (Icon + 'Wird geladen...', siehe
+    onedrive-sharepoint-migration-tool.spec), sobald das Hauptfenster steht.
+    pyi_splash existiert nur in einer gefrorenen Binary MIT aktiviertem
+    Splash-Feature - beim Start aus dem Quellcode (kein PyInstaller) oder
+    einer ohne Splash gebauten Binary ist das ein No-Op."""
+    try:
+        import pyi_splash
+    except ImportError:
+        return
+    pyi_splash.close()
+
+
 class App(ctk.CTk):
     def __init__(self, args):
         super().__init__()
@@ -78,6 +91,7 @@ class App(ctk.CTk):
         self.container.pack(fill="both", expand=True, padx=16, pady=16)
         self.current_frame = None
         self.show_home()
+        _close_splash()
 
     # ------------------------------------------------------------------
     # Navigation / Hintergrund-Ausfuehrung
