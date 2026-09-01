@@ -100,8 +100,19 @@ Aufruf:
 
 import argparse
 import platform
+from pathlib import Path
 
 from migration_core import TRANSFERS, CHECKERS
+
+# Faellt beim Fehlen von --ca-cert-bundle automatisch auf das lokale CA-Bundle
+# zurueck, FALLS es existiert (TLS-inspizierender Firmenproxy, z.B. Cato) -
+# frueher war das Aufgabe des .command-Launchers bzw. (im .app-Bundle) des
+# inzwischen entfernten Resources/launch.sh-Trampolins. Seit die .app die
+# Binary ohne Argumente direkt aufruft (kein Trampolin mehr, siehe
+# build_app.sh), muss dieser Default hier zentral sitzen, sonst schlaegt der
+# OAuth-Login beim Start per Finder-Doppelklick mit einem TLS-
+# Zertifikatsfehler fehl, obwohl --cli/.command weiterhin funktionieren.
+_DEFAULT_CA_CERT_BUNDLE = Path.home() / "combined-ca-bundle.pem"
 
 
 def _hide_windows_console() -> None:
@@ -135,6 +146,9 @@ def main() -> None:
     parser.add_argument("--transfers", type=int, default=TRANSFERS)
     parser.add_argument("--checkers", type=int, default=CHECKERS)
     args = parser.parse_args()
+
+    if args.ca_cert_bundle is None and _DEFAULT_CA_CERT_BUNDLE.exists():
+        args.ca_cert_bundle = str(_DEFAULT_CA_CERT_BUNDLE)
 
     if args.cli:
         import migration_cli

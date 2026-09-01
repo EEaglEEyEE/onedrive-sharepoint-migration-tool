@@ -52,13 +52,17 @@ def _resolve_work_dir() -> Path:
     """
     if getattr(sys, "frozen", False):
         exe_path = Path(sys.executable).resolve()
-        if ".app/Contents/Resources" in str(exe_path):
-            # Eingebettete Kopie im .app-Bundle - Projektordner liegt VIER
-            # Ebenen hoeher (Resources -> Contents -> .app -> Projektordner).
-            # Nur drei Ebenen landet noch INNERHALB des .app-Bundles selbst
-            # statt daneben, wo accounts.conf liegt - accounts.conf waere
-            # dort nie gefunden worden, jeder Start haette also faelschlich
-            # sofort einen neuen Login erzwungen.
+        if ".app/Contents/MacOS" in str(exe_path):
+            # Eingebettete Kopie im .app-Bundle (Contents/MacOS/<name> IST die
+            # Binary selbst, siehe build_app.sh - kein Resources/launch.sh-
+            # Zwischenlayer mehr). Projektordner liegt trotzdem VIER Ebenen
+            # hoeher (MacOS -> Contents -> .app -> Projektordner) - MacOS und
+            # das fruehere Resources liegen auf derselben Tiefe unter
+            # Contents, das Entfernen des Trampolins hat daran nichts
+            # geaendert. Ein erster Fix hier war faelschlich auf drei Ebenen
+            # verkuerzt worden (real per Test aufgefallen: "Neue Anmeldung"
+            # statt der laengst gespeicherten Konten) - nur vier Ebenen landet
+            # tatsaechlich daneben, wo accounts.conf liegt.
             return exe_path.parent.parent.parent.parent
         return exe_path.parent
     return Path(__file__).resolve().parent

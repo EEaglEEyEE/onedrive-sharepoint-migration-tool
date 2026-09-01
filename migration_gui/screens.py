@@ -9,6 +9,23 @@ import customtkinter as ctk
 
 PAD = 12
 
+# Konsistente Farben fuer sekundaere ("outline") Buttons und Eingabefelder -
+# ohne explizite Werte fallen CustomTkinter-Defaults auf die fuer die blaue
+# Akzentfarbe gedachten hellen Text-/Randfarben zurueck, die auf transparentem
+# bzw. hellem Hintergrund kaum lesbar sind (im Light Mode beobachtet).
+SECONDARY_BUTTON_STYLE = dict(
+    fg_color="transparent",
+    border_width=1,
+    border_color=("gray55", "gray45"),
+    text_color=("gray10", "gray90"),
+    hover_color=("gray85", "gray25"),
+)
+ENTRY_STYLE = dict(
+    fg_color=("gray95", "gray17"),
+    border_color=("gray55", "gray45"),
+    text_color=("gray10", "gray90"),
+)
+
 
 def format_bytes(n: float) -> str:
     n = n or 0
@@ -37,7 +54,7 @@ class HomeScreen(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         ctk.CTkLabel(self, text="OneDrive / SharePoint Migration", font=ctk.CTkFont(size=22, weight="bold")).pack(pady=(20, 6))
         ctk.CTkLabel(
-            self, text="Was moechtest du tun?", font=ctk.CTkFont(size=14), text_color="gray60"
+            self, text="Was möchtest du tun?", font=ctk.CTkFont(size=14), text_color="gray60"
         ).pack(pady=(0, 24))
 
         ctk.CTkButton(
@@ -45,14 +62,10 @@ class HomeScreen(ctk.CTkFrame):
             font=ctk.CTkFont(size=15, weight="bold"), command=app.start_copy_wizard,
         ).pack(pady=8)
 
-        dedupe_btn = ctk.CTkButton(
-            self, text="Duplikate finden", width=320, height=48, state="disabled",
-        )
-        dedupe_btn.pack(pady=8)
-        ctk.CTkLabel(
-            self, text="Duplikate finden ist aktuell nur per Terminal (--cli) verfuegbar.",
-            font=ctk.CTkFont(size=11), text_color="gray60",
-        ).pack(pady=(0, 8))
+        ctk.CTkButton(
+            self, text="Duplikate finden", width=320, height=48,
+            font=ctk.CTkFont(size=15, weight="bold"), command=app.start_dedupe_wizard,
+        ).pack(pady=8)
 
 
 class BusyScreen(ctk.CTkFrame):
@@ -69,15 +82,18 @@ class ErrorScreen(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         ctk.CTkLabel(self, text="Fehler", font=ctk.CTkFont(size=20, weight="bold"), text_color="#d9534f").pack(pady=(60, 12))
         ctk.CTkLabel(self, text=message, wraplength=560, justify="left").pack(padx=20, pady=8)
-        ctk.CTkButton(self, text="Zurueck zum Start", command=app.show_home).pack(pady=24)
+        ctk.CTkButton(self, text="Zurück zum Start", command=app.show_home).pack(pady=24)
 
 
 class EndpointTypeScreen(ctk.CTkFrame):
-    def __init__(self, master, app, label: str, on_choice):
+    def __init__(self, master, app, label: str, on_choice, allow_local: bool = True):
         super().__init__(master, fg_color="transparent")
         ctk.CTkLabel(self, text=label, font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(20, 4))
         ctk.CTkLabel(self, text="Wovon/wohin soll migriert werden?", text_color="gray60").pack(pady=(0, 20))
-        for text, value in (("OneDrive", "onedrive"), ("SharePoint-Site", "sharepoint"), ("Lokaler Pfad / Netzlaufwerk", "local")):
+        options = [("OneDrive", "onedrive"), ("SharePoint-Site", "sharepoint")]
+        if allow_local:
+            options.append(("Lokaler Pfad / Netzlaufwerk", "local"))
+        for text, value in options:
             ctk.CTkButton(self, text=text, width=320, height=44, command=lambda v=value: on_choice(v)).pack(pady=6)
 
 
@@ -85,7 +101,7 @@ class AccountPickerScreen(ctk.CTkFrame):
     def __init__(self, master, app, label: str, kind: str, accounts: list[str], on_pick_existing, on_new_login, on_reauth, on_back):
         super().__init__(master, fg_color="transparent")
         type_label = "OneDrive" if kind == "onedrive" else "SharePoint"
-        ctk.CTkLabel(self, text=f"{label}: Konto waehlen ({type_label})", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(20, 4))
+        ctk.CTkLabel(self, text=f"{label}: Konto wählen ({type_label})", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(20, 4))
 
         if accounts:
             scroll = ctk.CTkScrollableFrame(self, width=460, height=220)
@@ -94,7 +110,7 @@ class AccountPickerScreen(ctk.CTkFrame):
                 row = ctk.CTkFrame(scroll, fg_color="transparent")
                 row.pack(fill="x", pady=4)
                 ctk.CTkLabel(row, text=name, anchor="w").pack(side="left", padx=(4, 8), fill="x", expand=True)
-                ctk.CTkButton(row, text="Neu anmelden", width=110, fg_color="transparent", border_width=1,
+                ctk.CTkButton(row, text="Neu anmelden", width=110, **SECONDARY_BUTTON_STYLE,
                               command=lambda n=name: on_reauth(n)).pack(side="right", padx=4)
                 ctk.CTkButton(row, text="Verwenden", width=100,
                               command=lambda n=name: on_pick_existing(n)).pack(side="right", padx=4)
@@ -102,7 +118,7 @@ class AccountPickerScreen(ctk.CTkFrame):
             ctk.CTkLabel(self, text="Noch keine gespeicherten Konten dieses Typs.", text_color="gray60").pack(pady=12)
 
         ctk.CTkButton(self, text="Neue Anmeldung...", width=320, height=44, command=on_new_login).pack(pady=(12, 6))
-        ctk.CTkButton(self, text="Zurueck", width=320, fg_color="transparent", border_width=1, command=on_back).pack(pady=4)
+        ctk.CTkButton(self, text="Zurück", width=320, **SECONDARY_BUTTON_STYLE, command=on_back).pack(pady=4)
 
 
 class OAuthScreen(ctk.CTkFrame):
@@ -128,7 +144,7 @@ class SharePointSearchScreen(ctk.CTkFrame):
 
         search_row = ctk.CTkFrame(self, fg_color="transparent")
         search_row.pack(pady=(0, 12))
-        self.entry = ctk.CTkEntry(search_row, width=340, placeholder_text="Suchbegriff (leer = alle sichtbaren Sites)")
+        self.entry = ctk.CTkEntry(search_row, width=340, placeholder_text="Suchbegriff (leer = alle sichtbaren Sites)", **ENTRY_STYLE)
         self.entry.pack(side="left", padx=(0, 8))
         self.entry.bind("<Return>", lambda _e: self._search())
         ctk.CTkButton(search_row, text="Suchen", width=90, command=self._search).pack(side="left")
@@ -143,7 +159,7 @@ class SharePointSearchScreen(ctk.CTkFrame):
     def _search(self) -> None:
         for child in self.results_frame.winfo_children():
             child.destroy()
-        self.status_label.configure(text="Suche laeuft...")
+        self.status_label.configure(text="Suche läuft...")
         self.on_search(self.entry.get().strip())
 
     def set_results(self, sites: list[dict]) -> None:
@@ -159,7 +175,7 @@ class SharePointSearchScreen(ctk.CTkFrame):
             row.pack(fill="x", pady=3)
             text = ctk.CTkLabel(row, text=f"{name}\n{site.get('webUrl', '')}", anchor="w", justify="left", font=ctk.CTkFont(size=12))
             text.pack(side="left", padx=4, fill="x", expand=True)
-            ctk.CTkButton(row, text="Auswaehlen", width=100, command=lambda s=site: self.on_pick(s)).pack(side="right", padx=4)
+            ctk.CTkButton(row, text="Auswählen", width=100, command=lambda s=site: self.on_pick(s)).pack(side="right", padx=4)
 
     def set_error(self, message: str) -> None:
         self.status_label.configure(text=f"Suche fehlgeschlagen: {message}")
@@ -170,10 +186,10 @@ class SaveAccountScreen(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         ctk.CTkLabel(self, text="Konto dauerhaft speichern?", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(60, 4))
         ctk.CTkLabel(
-            self, text="Damit steht das Konto beim naechsten Start direkt zur Auswahl,\nohne erneuten Login.",
+            self, text="Damit steht das Konto beim nächsten Start direkt zur Auswahl,\nohne erneuten Login.",
             text_color="gray60", justify="center",
         ).pack(pady=(0, 16))
-        self.entry = ctk.CTkEntry(self, width=340)
+        self.entry = ctk.CTkEntry(self, width=340, **ENTRY_STYLE)
         self.entry.insert(0, suggested_name)
         self.entry.pack(pady=8)
         self.entry.bind("<Return>", lambda _e: on_save(self.entry.get().strip() or suggested_name))
@@ -181,7 +197,7 @@ class SaveAccountScreen(ctk.CTkFrame):
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(pady=16)
         ctk.CTkButton(row, text="Speichern", width=150, command=lambda: on_save(self.entry.get().strip() or suggested_name)).pack(side="left", padx=6)
-        ctk.CTkButton(row, text="Nicht speichern", width=150, fg_color="transparent", border_width=1, command=on_skip).pack(side="left", padx=6)
+        ctk.CTkButton(row, text="Nicht speichern", width=150, **SECONDARY_BUTTON_STYLE, command=on_skip).pack(side="left", padx=6)
 
 
 class ScopeScreen(ctk.CTkFrame):
@@ -193,7 +209,7 @@ class ScopeScreen(ctk.CTkFrame):
         ctk.CTkLabel(self, text="Umfang", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(16, 4))
         if vault_names:
             ctk.CTkLabel(
-                self, text=f"Hinweis: '{', '.join(vault_names)}' ist per API nicht zugaenglich und wird immer uebersprungen.",
+                self, text=f"Hinweis: '{', '.join(vault_names)}' ist per API nicht zugänglich und wird immer übersprungen.",
                 text_color="gray60", font=ctk.CTkFont(size=11),
             ).pack(pady=(0, 8))
 
@@ -201,7 +217,7 @@ class ScopeScreen(ctk.CTkFrame):
         mode_row = ctk.CTkFrame(self, fg_color="transparent")
         mode_row.pack(pady=8)
         ctk.CTkRadioButton(mode_row, text="Gesamten Inhalt kopieren", variable=self.mode, value="whole", command=self._render).pack(side="left", padx=10)
-        ctk.CTkRadioButton(mode_row, text="Nur ausgewaehlte Ordner", variable=self.mode, value="selected", command=self._render).pack(side="left", padx=10)
+        ctk.CTkRadioButton(mode_row, text="Nur ausgewählte Ordner", variable=self.mode, value="selected", command=self._render).pack(side="left", padx=10)
 
         self.exclude_foreign_var = ctk.BooleanVar(value=True)
         self.foreign_names = foreign_names
@@ -222,13 +238,13 @@ class ScopeScreen(ctk.CTkFrame):
         if self.mode.get() == "whole":
             if self.foreign_names:
                 ctk.CTkLabel(
-                    self.body, text="Folgende Eintraege sind Verknuepfungen zu Inhalten aus einem anderen Konto/einer anderen Site:",
+                    self.body, text="Folgende Einträge sind Verknüpfungen zu Inhalten aus einem anderen Konto/einer anderen Site:",
                     text_color="gray60", font=ctk.CTkFont(size=12),
                 ).pack(pady=(4, 2))
                 ctk.CTkLabel(self.body, text=", ".join(self.foreign_names), font=ctk.CTkFont(size=12)).pack()
-                ctk.CTkCheckBox(self.body, text="Diese ausschliessen", variable=self.exclude_foreign_var).pack(pady=10)
+                ctk.CTkCheckBox(self.body, text="Diese ausschließen", variable=self.exclude_foreign_var).pack(pady=10)
             else:
-                ctk.CTkLabel(self.body, text="Keine Verknuepfungen zu fremden Konten/Sites im Root gefunden.", text_color="gray60").pack(pady=10)
+                ctk.CTkLabel(self.body, text="Keine Verknüpfungen zu fremden Konten/Sites im Root gefunden.", text_color="gray60").pack(pady=10)
         else:
             scroll = ctk.CTkScrollableFrame(self.body, width=480, height=220)
             scroll.pack()
@@ -236,7 +252,7 @@ class ScopeScreen(ctk.CTkFrame):
             for item in self.folder_items:
                 var = ctk.BooleanVar(value=False)
                 self.checkbox_vars[item["name"]] = var
-                text = item["name"] + ("  [Verknuepfung aus anderem Konto/Site]" if item["is_foreign"] else "")
+                text = item["name"] + ("  [Verknüpfung aus anderem Konto/Site]" if item["is_foreign"] else "")
                 ctk.CTkCheckBox(scroll, text=text, variable=var).pack(anchor="w", pady=2, padx=4)
 
     def _submit(self) -> None:
@@ -246,7 +262,7 @@ class ScopeScreen(ctk.CTkFrame):
             return
         selected = [name for name, var in self.checkbox_vars.items() if var.get()]
         if not selected:
-            self.error_label.configure(text="Bitte mindestens einen Ordner auswaehlen.")
+            self.error_label.configure(text="Bitte mindestens einen Ordner auswählen.")
             return
         self.on_submit(selected, False)
 
@@ -255,8 +271,8 @@ class TargetSubfolderScreen(ctk.CTkFrame):
     def __init__(self, master, app, on_submit):
         super().__init__(master, fg_color="transparent")
         ctk.CTkLabel(self, text="Ziel-Unterordner", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(60, 4))
-        ctk.CTkLabel(self, text="Leer lassen fuer den Root des Ziels.", text_color="gray60").pack(pady=(0, 16))
-        self.entry = ctk.CTkEntry(self, width=340, placeholder_text="z.B. Backup/2026")
+        ctk.CTkLabel(self, text="Leer lassen für den Root des Ziels.", text_color="gray60").pack(pady=(0, 16))
+        self.entry = ctk.CTkEntry(self, width=340, placeholder_text="z.B. Backup/2026", **ENTRY_STYLE)
         self.entry.pack(pady=8)
         self.entry.bind("<Return>", lambda _e: on_submit(self.entry.get()))
         ctk.CTkButton(self, text="Weiter", width=200, command=lambda: on_submit(self.entry.get())).pack(pady=16)
@@ -266,14 +282,14 @@ class SummaryScreen(ctk.CTkFrame):
     def __init__(self, master, app, lines: list[str], on_start, on_cancel):
         super().__init__(master, fg_color="transparent")
         ctk.CTkLabel(self, text="Zusammenfassung", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(16, 8))
-        box = ctk.CTkTextbox(self, width=560, height=280)
+        box = ctk.CTkTextbox(self, width=560, height=280, **ENTRY_STYLE)
         box.pack(pady=8)
         box.insert("1.0", "\n".join(lines))
         box.configure(state="disabled")
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(pady=12)
         ctk.CTkButton(row, text="Kopieren starten", width=200, font=ctk.CTkFont(weight="bold"), command=on_start).pack(side="left", padx=6)
-        ctk.CTkButton(row, text="Abbrechen", width=150, fg_color="transparent", border_width=1, command=on_cancel).pack(side="left", padx=6)
+        ctk.CTkButton(row, text="Abbrechen", width=150, **SECONDARY_BUTTON_STYLE, command=on_cancel).pack(side="left", padx=6)
 
 
 class ProgressScreen(ctk.CTkFrame):
@@ -282,7 +298,7 @@ class ProgressScreen(ctk.CTkFrame):
         self.total_pairs = total_pairs
         self._cancel_cb = None
 
-        ctk.CTkLabel(self, text="Kopiervorgang laeuft...", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(20, 4))
+        ctk.CTkLabel(self, text="Kopiervorgang läuft...", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(20, 4))
         self.pair_label = ctk.CTkLabel(self, text="", text_color="gray60")
         self.pair_label.pack(pady=(0, 12))
 
@@ -299,7 +315,7 @@ class ProgressScreen(ctk.CTkFrame):
         self.retry_label = ctk.CTkLabel(self, text="", text_color="#e0a800")
         self.retry_label.pack(pady=4)
 
-        self.cancel_btn = ctk.CTkButton(self, text="Abbrechen", fg_color="transparent", border_width=1, command=self._on_cancel_clicked)
+        self.cancel_btn = ctk.CTkButton(self, text="Abbrechen", **SECONDARY_BUTTON_STYLE, command=self._on_cancel_clicked)
         self.cancel_btn.pack(pady=16)
 
     def bind_cancel(self, cancel_fn) -> None:
@@ -345,7 +361,7 @@ class ResultsScreen(ctk.CTkFrame):
         ctk.CTkLabel(self, text=title, font=ctk.CTkFont(size=22, weight="bold"), text_color=color).pack(pady=(40, 8))
 
         messages = {
-            "ok": "Alles vollstaendig kopiert und verifiziert.",
+            "ok": "Alles vollständig kopiert und verifiziert.",
             "cancelled": "Der Vorgang wurde abgebrochen. Erneut starten, um fehlende Dateien nachzukopieren.",
             "copy_failed": f"Mindestens ein Kopiervorgang blieb fehlerhaft. Details im Log: {log_file}",
             "check_failed": f"Verifikation hat Abweichungen gefunden. Details im Log: {log_file}\nErneut starten, um abweichende/fehlende Dateien nachzukopieren.",
@@ -355,14 +371,100 @@ class ResultsScreen(ctk.CTkFrame):
 
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(pady=8)
-        ctk.CTkButton(row, text="Log oeffnen", width=140, command=lambda: app_open(log_file)).pack(side="left", padx=6)
+        ctk.CTkButton(row, text="Log öffnen", width=140, command=lambda: app_open(log_file)).pack(side="left", padx=6)
         if error_count:
-            ctk.CTkButton(row, text="Fehler-Log oeffnen", width=160, command=lambda: app_open(error_file)).pack(side="left", padx=6)
+            ctk.CTkButton(row, text="Fehler-Log öffnen", width=160, command=lambda: app_open(error_file)).pack(side="left", padx=6)
 
         row2 = ctk.CTkFrame(self, fg_color="transparent")
         row2.pack(pady=16)
         ctk.CTkButton(row2, text="Neuer Lauf", width=150, command=on_restart).pack(side="left", padx=6)
-        ctk.CTkButton(row2, text="Beenden", width=150, fg_color="transparent", border_width=1, command=on_quit).pack(side="left", padx=6)
+        ctk.CTkButton(row2, text="Beenden", width=150, **SECONDARY_BUTTON_STYLE, command=on_quit).pack(side="left", padx=6)
+
+
+class DedupeOptionsScreen(ctk.CTkFrame):
+    def __init__(self, master, app, default_output: str, vault_names: list[str], foreign_names: list[str], on_submit):
+        super().__init__(master, fg_color="transparent")
+        self.on_submit = on_submit
+        ctk.CTkLabel(self, text="Duplikate suchen", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(16, 4))
+
+        if vault_names:
+            ctk.CTkLabel(
+                self, text=f"Hinweis: '{', '.join(vault_names)}' ist per API nicht zugänglich und wird immer übersprungen.",
+                text_color="gray60", font=ctk.CTkFont(size=11),
+            ).pack(pady=(4, 0))
+        if foreign_names:
+            ctk.CTkLabel(
+                self, text="Verknüpfungen zu anderen Konten/Sites werden mit durchsucht (Duplikate über Freigaben hinweg).",
+                text_color="gray60", font=ctk.CTkFont(size=11),
+            ).pack(pady=(2, 0))
+
+        ctk.CTkLabel(self, text="CSV-Ausgabepfad", font=ctk.CTkFont(size=13, weight="bold")).pack(pady=(20, 4))
+        path_row = ctk.CTkFrame(self, fg_color="transparent")
+        path_row.pack()
+        self.path_entry = ctk.CTkEntry(path_row, width=420, **ENTRY_STYLE)
+        self.path_entry.insert(0, default_output)
+        self.path_entry.pack(side="left", padx=(0, 8))
+        ctk.CTkButton(path_row, text="Durchsuchen...", width=110, **SECONDARY_BUTTON_STYLE, command=self._browse).pack(side="left")
+
+        ctk.CTkLabel(self, text="Weitere auszuschließende Muster (kommagetrennt, optional)", font=ctk.CTkFont(size=13, weight="bold")).pack(pady=(20, 4))
+        self.excludes_entry = ctk.CTkEntry(self, width=540, placeholder_text="z.B. _Archiv/**", **ENTRY_STYLE)
+        self.excludes_entry.pack()
+
+        self.error_label = ctk.CTkLabel(self, text="", text_color="#d9534f")
+        self.error_label.pack(pady=(8, 0))
+        ctk.CTkButton(self, text="Duplikate suchen", width=220, font=ctk.CTkFont(weight="bold"), command=self._submit).pack(pady=16)
+
+    def _browse(self) -> None:
+        import tkinter.filedialog as filedialog
+        path = filedialog.asksaveasfilename(
+            title="CSV-Ausgabepfad wählen", defaultextension=".csv", filetypes=[("CSV", "*.csv")],
+            initialfile=self.path_entry.get().split("/")[-1],
+        )
+        if path:
+            self.path_entry.delete(0, "end")
+            self.path_entry.insert(0, path)
+
+    def _submit(self) -> None:
+        output_path = self.path_entry.get().strip()
+        if not output_path:
+            self.error_label.configure(text="Bitte einen CSV-Ausgabepfad angeben.")
+            return
+        excludes = [p.strip() for p in self.excludes_entry.get().split(",") if p.strip()]
+        self.on_submit(output_path, excludes)
+
+
+class DedupeResultsScreen(ctk.CTkFrame):
+    def __init__(self, master, app, output_path: str, file_count: int, groups_by_category: dict, files_by_category: dict, skipped_no_hash: int, on_restart, on_quit):
+        super().__init__(master, fg_color="transparent")
+        ctk.CTkLabel(self, text="Fertig", font=ctk.CTkFont(size=22, weight="bold"), text_color="#2fa84f").pack(pady=(40, 8))
+        ctk.CTkLabel(self, text=f"{file_count} Dateien durchsucht.", justify="center").pack(pady=(0, 4))
+        if skipped_no_hash:
+            ctk.CTkLabel(
+                self, text=f"Hinweis: {skipped_no_hash} Datei(en) ohne Hash vom Backend übersprungen (kann nicht sicher verglichen werden).",
+                text_color="gray60", font=ctk.CTkFont(size=11),
+            ).pack(pady=(0, 8))
+
+        box = ctk.CTkFrame(self, fg_color="transparent")
+        box.pack(pady=12)
+        for category, label in [
+            ("1_sicheres_duplikat", "Sichere Duplikate"),
+            ("2_nur_name_gleich", "Nur Name gleich"),
+            ("3_nur_hash_gleich", "Nur Hash gleich"),
+        ]:
+            groups = len(groups_by_category.get(category, ()))
+            files = files_by_category.get(category, 0)
+            ctk.CTkLabel(box, text=f"{label}: {groups} Gruppen ({files} Dateien)").pack(anchor="w", pady=2)
+
+        ctk.CTkLabel(self, text=output_path, text_color="gray60", font=ctk.CTkFont(size=11), wraplength=560).pack(pady=(8, 16))
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(pady=8)
+        ctk.CTkButton(row, text="CSV öffnen", width=150, command=lambda: app_open(output_path)).pack(side="left", padx=6)
+
+        row2 = ctk.CTkFrame(self, fg_color="transparent")
+        row2.pack(pady=16)
+        ctk.CTkButton(row2, text="Neuer Lauf", width=150, command=on_restart).pack(side="left", padx=6)
+        ctk.CTkButton(row2, text="Beenden", width=150, **SECONDARY_BUTTON_STYLE, command=on_quit).pack(side="left", padx=6)
 
 
 def app_open(path) -> None:

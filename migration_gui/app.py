@@ -10,16 +10,19 @@ import queue
 import subprocess
 import threading
 import tkinter.filedialog as filedialog
+from collections import defaultdict
 from pathlib import Path
 
 import customtkinter as ctk
 
 from migration_core import (
+    DESKTOP_DIR,
     GRAPH_ROOT,
     RCLONE_BIN,
     ToolError,
     WORK_DIR,
     account_kind,
+    build_report_rows,
     extract_error_lines,
     fetch_own_drive,
     find_rclone,
@@ -32,15 +35,19 @@ from migration_core import (
     log_manifest,
     save_account,
     search_sharepoint_sites,
+    slugify_for_filename,
     suggest_account_name,
     sync_account_token,
+    write_dedupe_csv,
 )
-from migration_cli import create_onedrive_remote, install_rclone, rclone_authorize_onedrive, refresh_remote_token
+from migration_cli import create_onedrive_remote, install_rclone, list_files_for_dedupe, rclone_authorize_onedrive, refresh_remote_token
 
 from migration_gui.rc_progress import CheckJob, CopyJob
 from migration_gui.screens import (
     AccountPickerScreen,
     BusyScreen,
+    DedupeOptionsScreen,
+    DedupeResultsScreen,
     EndpointTypeScreen,
     ErrorScreen,
     HomeScreen,
@@ -129,10 +136,11 @@ class App(ctk.CTk):
 
     # --- Endpunkt-Auswahl (fuer Quelle UND Ziel wiederverwendet) ---
 
-    def _resolve_endpoint(self, which: str, label: str, on_complete) -> None:
+    def _resolve_endpoint(self, which: str, label: str, on_complete, allow_local: bool = True) -> None:
         self.wizard[f"{which}_label"] = label
         self.wizard[f"{which}_on_complete"] = on_complete
-        self._set_frame(EndpointTypeScreen, label=label, on_choice=lambda t: self._endpoint_type_chosen(which, t))
+        self.wizard[f"{which}_allow_local"] = allow_local
+        self._set_frame(EndpointTypeScreen, label=label, on_choice=lambda t: self._endpoint_type_chosen(which, t), allow_local=allow_local)
 
     def _endpoint_type_chosen(self, which: str, endpoint_type: str) -> None:
         if endpoint_type == "local":
@@ -142,9 +150,9 @@ class App(ctk.CTk):
 
     def _pick_local_folder(self, which: str) -> None:
         label = self.wizard[f"{which}_label"]
-        path = filedialog.askdirectory(title=f"Ordner fuer {label} waehlen")
+        path = filedialog.askdirectory(title=f"Ordner für {label} wählen")
         if not path:
-            self._resolve_endpoint(which, label, self.wizard[f"{which}_on_complete"])
+            self._resolve_endpoint(which, label, self.wizard[f"{which}_on_complete"], allow_local=self.wizard[f"{which}_allow_local"])
             return
         info = {"kind": "local", "path": path, "identity": f"Lokal/Netzlaufwerk ({path})", "account_name": None}
         self._complete_endpoint(which, info)
@@ -162,7 +170,7 @@ class App(ctk.CTk):
             on_pick_existing=lambda name: self._account_picked(which, name),
             on_new_login=lambda: self._start_oauth(which, kind, label),
             on_reauth=lambda name: self._start_oauth(which, kind, label, reauth_name=name),
-            on_back=lambda: self._resolve_endpoint(which, label, self.wizard[f"{which}_on_complete"]),
+            on_back=lambda: self._resolve_endpoint(which, label, self.wizard[f"{which}_on_complete"], allow_local=self.wizard[f"{which}_allow_local"]),
         )
 
     def _account_picked(self, which: str, name: str) -> None:
@@ -218,7 +226,7 @@ class App(ctk.CTk):
 
             self._run_async(
                 work, on_success,
-                on_error=lambda exc: self._show_error_and_home(f"Konnte {label} nicht ueber Microsoft Graph aufloesen: {exc}"),
+                on_error=lambda exc: self._show_error_and_home(f"Konnte {label} nicht über Microsoft Graph auflösen: {exc}"),
             )
         else:
             self._set_frame(
@@ -239,7 +247,7 @@ class App(ctk.CTk):
     def _site_picked(self, which: str, token: str, site: dict) -> None:
         label = self.wizard[f"{which}_label"]
         site_name = site.get("displayName") or site.get("name") or "(ohne Namen)"
-        self._set_frame(BusyScreen, text=f"Ermittle Dokumentbibliothek fuer '{site_name}'...")
+        self._set_frame(BusyScreen, text=f"Ermittle Dokumentbibliothek für '{site_name}'...")
 
         def work():
             return graph_get(f"{GRAPH_ROOT}/sites/{site['id']}/drive", token, self.args.ca_cert_bundle)
@@ -256,7 +264,7 @@ class App(ctk.CTk):
 
         self._run_async(
             work, on_success,
-            on_error=lambda exc: self._show_error_and_home(f"Konnte {label} nicht ueber Microsoft Graph aufloesen: {exc}"),
+            on_error=lambda exc: self._show_error_and_home(f"Konnte {label} nicht über Microsoft Graph auflösen: {exc}"),
         )
 
     def _show_save_account_dialog(self, which, token, drive_id, drive_type, identity, kind, suggested_name, extra_config) -> None:
@@ -290,12 +298,12 @@ class App(ctk.CTk):
                 extra_config={"disable_site_permission": "true"} if info["kind"] == "onedrive" else None,
             )
             if exit_code != 0:
-                raise ToolError(f"Config fuer Quelle fehlgeschlagen (Exit Code {exit_code}).", exit_code)
+                raise ToolError(f"Config für Quelle fehlgeschlagen (Exit Code {exit_code}).", exit_code)
             refreshed = refresh_remote_token("source", config_path, env)
             if refreshed is None:
                 raise ToolError(
-                    "Verbindung zur Quelle fehlgeschlagen - Token evtl. abgelaufen/ungueltig. "
-                    "Bitte neu starten und beim Konto 'Neu anmelden' waehlen.", 1,
+                    "Verbindung zur Quelle fehlgeschlagen - Token evtl. abgelaufen/ungültig. "
+                    "Bitte neu starten und beim Konto 'Neu anmelden' wählen.", 1,
                 )
             info["token"] = refreshed
             return list_root_items(info["token"], info["drive_id"], self.args.ca_cert_bundle)
@@ -341,7 +349,7 @@ class App(ctk.CTk):
                 extra_config={"no_versions": "true"} if needs_ignore_flags else None,
             )
             if exit_code != 0:
-                raise ToolError(f"Config fuer Ziel fehlgeschlagen (Exit Code {exit_code}).", exit_code)
+                raise ToolError(f"Config für Ziel fehlgeschlagen (Exit Code {exit_code}).", exit_code)
             check = subprocess.run(
                 [RCLONE_BIN, "lsd", "target:", "--config", str(config_path), "--max-depth", "1"],
                 env=env, capture_output=True, text=True,
@@ -398,16 +406,16 @@ class App(ctk.CTk):
         summary_lines = [
             f"Quelle: {source_info['identity']}",
             f"Ziel: {target_info['identity']}",
-            f"Umfang: {'gesamter Inhalt' if selected_folders is None else 'ausgewaehlte Ordner: ' + ', '.join(selected_folders)}",
+            f"Umfang: {'gesamter Inhalt' if selected_folders is None else 'ausgewählte Ordner: ' + ', '.join(selected_folders)}",
             f"Exclusion: {', '.join(f'{n}/**' for n in w['exclude_names']) if w['exclude_names'] else 'keine'}",
         ]
         if w["needs_ignore_flags"]:
             summary_lines.append(
-                "Hinweis: Ziel ist SharePoint bzw. OneDrive Business - Groessen- und "
-                "Pruefsummenpruefung nach Upload sind deaktiviert, da diese Backends "
-                "Dateien serverseitig veraendern."
+                "Hinweis: Ziel ist SharePoint bzw. OneDrive Business - Größen- und "
+                "Prüfsummenprüfung nach Upload sind deaktiviert, da diese Backends "
+                "Dateien serverseitig verändern."
             )
-        summary_lines.append("Geplante Kopiervorgaenge:")
+        summary_lines.append("Geplante Kopiervorgänge:")
         summary_lines += [f"  {src} -> {tgt}" for src, tgt in copy_pairs]
         for line in summary_lines:
             log_manifest(w["log_file"], line)
@@ -453,7 +461,7 @@ class App(ctk.CTk):
             return
 
         w = self.wizard
-        self._set_frame(BusyScreen, text="Verifikation (Pruefsummenvergleich) laeuft...")
+        self._set_frame(BusyScreen, text="Verifikation (Prüfsummenvergleich) läuft...")
         check_extra = ["--ignore-size"] if w["needs_ignore_flags"] else []
         job = CheckJob(w["copy_pairs"], w["config_path"], w["log_file"], w["env"], self.args.checkers, extra_args=check_extra)
         job.start()
@@ -490,6 +498,100 @@ class App(ctk.CTk):
             ResultsScreen, status=status, log_file=w["log_file"], error_file=error_file, error_count=error_count,
             on_restart=self.show_home, on_quit=self.destroy,
         )
+
+    # ------------------------------------------------------------------
+    # Werkzeug 2: Duplikate finden
+    # ------------------------------------------------------------------
+
+    def start_dedupe_wizard(self) -> None:
+        env = os.environ.copy()
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        config_path = WORK_DIR / f"rclone_{timestamp}_{os.getpid()}.conf"
+        if self.args.ca_cert_bundle:
+            env["RCLONE_CA_CERT"] = self.args.ca_cert_bundle
+        env["RCLONE_CONFIG"] = str(config_path)
+        self.wizard = {"env": env, "config_path": config_path, "timestamp": timestamp}
+        self._resolve_endpoint("scan", "Zu durchsuchendes Konto", self._after_scan_resolved, allow_local=False)
+
+    def _after_scan_resolved(self, info: dict) -> None:
+        self._set_frame(BusyScreen, text="Ermittle Inhalt des Kontos...")
+        config_path = self.wizard["config_path"]
+        env = self.wizard["env"]
+
+        def work():
+            exit_code = create_onedrive_remote(
+                "scan", info["token"], info["drive_id"], info["drive_type"], config_path, env,
+                extra_config={"disable_site_permission": "true"} if info["kind"] == "onedrive" else None,
+            )
+            if exit_code != 0:
+                raise ToolError(f"Config fehlgeschlagen (Exit Code {exit_code}).", exit_code)
+            refreshed = refresh_remote_token("scan", config_path, env)
+            if refreshed is None:
+                raise ToolError(
+                    "Verbindung zum Konto fehlgeschlagen - Token evtl. abgelaufen/ungültig. "
+                    "Bitte neu starten und beim Konto 'Neu anmelden' wählen.", 1,
+                )
+            info["token"] = refreshed
+            return list_root_items(info["token"], info["drive_id"], self.args.ca_cert_bundle)
+
+        def on_success(items):
+            self.wizard["scan_root_items"] = items
+            self._show_dedupe_options_screen(items)
+
+        self._run_async(work, on_success)
+
+    def _show_dedupe_options_screen(self, items: list[dict]) -> None:
+        w = self.wizard
+        scan_info = w["scan_info"]
+        own_label = scan_info.get("account_name") or scan_info["identity"]
+        vault_names = [item["name"] for item in items if item["is_locked_vault"]]
+        foreign_names = [item["name"] for item in items if item["is_foreign"]]
+        default_output = str(DESKTOP_DIR / f"dedupe_report_{slugify_for_filename(own_label)}_{w['timestamp']}.csv")
+        self._set_frame(
+            DedupeOptionsScreen, default_output=default_output, vault_names=vault_names, foreign_names=foreign_names,
+            on_submit=self._run_dedupe_scan,
+        )
+
+    def _run_dedupe_scan(self, output_path: str, extra_excludes: list[str]) -> None:
+        w = self.wizard
+        scan_info = w["scan_info"]
+        items = w["scan_root_items"]
+        # Anders als beim Kopieren werden Verknuepfungen zu Fremd-Shares beim
+        # Duplikat-Scan NICHT ausgeschlossen - Duplikate sollen bewusst auch
+        # ueber geteilte OneDrive-/SharePoint-Verknuepfungen hinweg gefunden
+        # werden. Der Persoenliche Tresor bleibt trotzdem ausgeschlossen.
+        vault_names = [item["name"] for item in items if item["is_locked_vault"]]
+        excludes = [f"{name}/**" for name in vault_names] + extra_excludes
+        own_label = scan_info.get("account_name") or scan_info["identity"]
+        foreign_names = {item["name"] for item in items if item["is_foreign"]}
+
+        self._set_frame(BusyScreen, text="Durchsuche Konto (rclone lsjson -R --hash) - bei vielen Dateien kann das dauern...")
+
+        def work():
+            files = list_files_for_dedupe("scan:", w["env"], excludes)
+            if files is None:
+                raise ToolError("Konnte Konto nicht durchsuchen (rclone lsjson fehlgeschlagen).", 1)
+            rows, skipped_no_hash = build_report_rows(files, own_label, foreign_names)
+            write_dedupe_csv(rows, output_path)
+            if scan_info.get("account_name"):
+                sync_account_token(scan_info["account_name"], "scan", w["config_path"])
+            Path(w["config_path"]).unlink(missing_ok=True)
+            return rows, skipped_no_hash, len(files)
+
+        def on_success(result):
+            rows, skipped_no_hash, file_count = result
+            groups_by_category = defaultdict(set)
+            files_by_category = defaultdict(int)
+            for row in rows:
+                groups_by_category[row["Kategorie"]].add(row["Gruppe"])
+                files_by_category[row["Kategorie"]] += 1
+            self._set_frame(
+                DedupeResultsScreen, output_path=output_path, file_count=file_count,
+                groups_by_category=groups_by_category, files_by_category=files_by_category,
+                skipped_no_hash=skipped_no_hash, on_restart=self.show_home, on_quit=self.destroy,
+            )
+
+        self._run_async(work, on_success)
 
 
 def main(args) -> None:
