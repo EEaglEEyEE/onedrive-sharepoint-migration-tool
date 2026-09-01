@@ -121,12 +121,16 @@ proxy/firewall (Cato, Zscaler, etc.) and haven't set up a bypass rule for
 
 ### Double-click launchers
 
-- **macOS**: `onedrive-sharepoint-migration-tool.command` — runs a bundled `onedrive-sharepoint-migration-tool` binary if
-  present (see Packaging below), otherwise falls back to `python3
-  onedrive-sharepoint-migration-tool.py` (auto-installing Python via Homebrew if missing).
-- **Windows**: `onedrive-sharepoint-migration-tool.bat` — runs `onedrive-sharepoint-migration-tool.exe` if present,
-  otherwise falls back to `py`/`python`, auto-installing Python via `winget`
-  if missing.
+Both launchers expect the packaged binary under `dist/` (see Packaging below)
+— that's where PyInstaller puts its output by default, and `build_exe.ps1`
+follows the same convention.
+
+- **macOS**: `onedrive-sharepoint-migration-tool.command` — runs
+  `dist/onedrive-sharepoint-migration-tool`.
+- **Windows**: `onedrive-sharepoint-migration-tool.bat` — runs
+  `dist\onedrive-sharepoint-migration-tool.exe` if present, otherwise falls
+  back to `py`/`python` directly on the `.py` script, auto-installing Python
+  via `winget` if missing.
 
 ## Packaging as a single self-contained binary
 
