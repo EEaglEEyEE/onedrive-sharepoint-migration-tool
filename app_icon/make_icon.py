@@ -187,3 +187,13 @@ if __name__ == "__main__":
     splash_path = OUT_DIR / "splash.png"
     build_splash(master).save(splash_path)
     print("splash geschrieben:", splash_path)
+
+    # --- Einzelne PNG-Groessen fuer Tks iconphoto() (Windows-Fenster-/
+    # Taskleisten-Icon, siehe migration_gui/app.py) - mehrere echte,
+    # sauber herunterskalierte Groessen statt eine einzelne 1024px-Datei,
+    # damit Tk je nach angefragter Groesse (Taskleiste vs. Titelleiste vs.
+    # Alt-Tab) die passende nimmt, statt intern grob zu skalieren.
+    for s in (16, 32, 48, 64, 128, 256):
+        out_path = OUT_DIR / f"icon_{s}.png"
+        master.resize((s, s), Image.LANCZOS).save(out_path)
+        print(f"icon_{s}.png geschrieben:", out_path)

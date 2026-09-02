@@ -94,25 +94,48 @@ def _apply_window_icon(root: ctk.CTk) -> None:
     dort unabhaengig von Tk aus dem .app-Bundle (BUNDLE(icon=...), bereits
     korrekt).
 
-    Nutzt iconphoto() mit einer PNG statt iconbitmap() mit der .ico: Tks
-    eigener .ico-Parser kam mit den PNG-komprimierten kleinen Icon-Eintraegen
+    Nutzt iconphoto() mit PNGs statt iconbitmap() mit der .ico: Tks eigener
+    .ico-Parser kam mit den PNG-komprimierten kleinen Icon-Eintraegen
     (16x16/32x32) nicht klar und zeigte ein grob herunterskaliertes,
-    verpixeltes Icon - iconphoto() laedt stattdessen ueber Tks robusten
-    eingebauten PNG-Reader direkt aus einer echten PNG-Datei."""
+    verpixeltes Icon - iconphoto() laedt stattdessen ueber Tks eingebauten
+    PNG-Reader direkt aus echten PNG-Dateien. Mehrere Groessen (16-256px)
+    statt nur einer grossen, damit Tk je nach Kontext (Taskleiste,
+    Titelleiste, Alt-Tab) die passende nimmt statt selbst zu skalieren.
+
+    Schreibt bewusst ein kleines Diagnose-Log (icon_debug.log neben
+    accounts.conf) mit Erfolg/Fehler - das Icon ist zwar rein kosmetisch und
+    darf den Start nie verhindern (siehe except unten), aber ohne sichtbares
+    Konsolenfenster im GUI-Modus waere ein stillschweigend fehlschlagendes
+    iconphoto() sonst nicht diagnostizierbar."""
     if platform.system() != "Windows":
         return
+    log_path = WORK_DIR / "icon_debug.log"
+
+    def log(message: str) -> None:
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S} {message}\n")
+        except OSError:
+            pass
+
     try:
-        if getattr(sys, "frozen", False):
-            icon_path = Path(sys._MEIPASS) / "app_icon" / "icon_1024.png"  # noqa: SLF001
-        else:
-            icon_path = Path(__file__).resolve().parent.parent / "app_icon" / "icon_1024.png"
-        if icon_path.exists():
-            import tkinter as tk
-            photo = tk.PhotoImage(file=str(icon_path))
-            root.iconphoto(True, photo)
-            root._window_icon_photo = photo  # Referenz halten, sonst sammelt Tk das Bild wieder ein
-    except Exception:  # noqa: BLE001 - Icon ist rein kosmetisch, darf den Start nie verhindern
-        pass
+        base_dir = Path(sys._MEIPASS) / "app_icon" if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent / "app_icon"  # noqa: SLF001
+        import tkinter as tk
+        photos = []
+        for size in (16, 32, 48, 128, 256):
+            icon_path = base_dir / f"icon_{size}.png"
+            if not icon_path.exists():
+                log(f"uebersprungen (fehlt): {icon_path}")
+                continue
+            photos.append(tk.PhotoImage(file=str(icon_path)))
+        if not photos:
+            log(f"kein einziges Icon-PNG gefunden unter {base_dir}")
+            return
+        root.iconphoto(True, *photos)
+        root._window_icon_photos = photos  # Referenzen halten, sonst sammelt Tk die Bilder wieder ein
+        log(f"OK - {len(photos)} Groesse(n) gesetzt aus {base_dir}")
+    except Exception as exc:  # noqa: BLE001 - Icon ist rein kosmetisch, darf den Start nie verhindern
+        log(f"FEHLER: {type(exc).__name__}: {exc}")
 
 
 class App(ctk.CTk):
