@@ -89,24 +89,25 @@ def _apply_window_icon(root: ctk.CTk) -> None:
     .spec bettet das Icon nur in die PE-Ressourcen der .exe ein (das, was
     Explorer fuer die Datei anzeigt) - das Tk-Fenster selbst zeigt trotzdem
     Tks eigenes Standard-Icon, bis man es explizit setzt; Windows liest
-    Taskleisten-/Titelleisten-Icon von genau dieser Tk-Einstellung, nicht
-    automatisch von der .exe. macOS braucht das nicht - das Dock-Icon kommt
-    dort unabhaengig von Tk aus dem .app-Bundle (BUNDLE(icon=...), bereits
-    korrekt).
+    Taskleisten-/Titelleisten-Icon von genau dieser Fenster-Einstellung,
+    nicht automatisch von der .exe. macOS braucht das nicht - das Dock-Icon
+    kommt dort unabhaengig von Tk aus dem .app-Bundle (BUNDLE(icon=...),
+    bereits korrekt).
 
-    Nutzt iconphoto() mit PNGs statt iconbitmap() mit der .ico: Tks eigener
-    .ico-Parser kam mit den PNG-komprimierten kleinen Icon-Eintraegen
-    (16x16/32x32) nicht klar und zeigte ein grob herunterskaliertes,
-    verpixeltes Icon - iconphoto() laedt stattdessen ueber Tks eingebauten
-    PNG-Reader direkt aus echten PNG-Dateien. Mehrere Groessen (16-256px)
-    statt nur einer grossen, damit Tk je nach Kontext (Taskleiste,
-    Titelleiste, Alt-Tab) die passende nimmt statt selbst zu skalieren.
-
-    Schreibt bewusst ein kleines Diagnose-Log (icon_debug.log neben
-    accounts.conf) mit Erfolg/Fehler - das Icon ist zwar rein kosmetisch und
-    darf den Start nie verhindern (siehe except unten), aber ohne sichtbares
-    Konsolenfenster im GUI-Modus waere ein stillschweigend fehlschlagendes
-    iconphoto() sonst nicht diagnostizierbar."""
+    Zwei Ebenen, beide per icon_debug.log (neben accounts.conf) protokolliert
+    (das Icon ist rein kosmetisch, darf den Start nie verhindern):
+    1. iconphoto() mit mehreren PNG-Groessen - lief laut Log fehlerfrei durch,
+       zeigte aber trotzdem keine Wirkung. Wahrscheinliche Ursache: der aus
+       __init__() heraus VOR mainloop()/vor dem ersten Realisieren des
+       Fensters aufgerufene iconphoto() setzt Tks internen Zustand, ohne dass
+       Windows das tatsaechliche WM_SETICON schon zustellen kann - deshalb
+       jetzt per root.after() verzoegert, erst wenn mainloop tatsaechlich
+       laeuft und das Fenster real existiert.
+    2. Zusaetzlich (robuster, unabhaengig von Tk/CustomTkinter-Eigenheiten
+       rund um Fenster-Icons unter Windows) WM_SETICON direkt per WinAPI am
+       tatsaechlichen Top-Level-Fensterhandle - setzt Taskleisten-
+       (ICON_SMALL) und Alt-Tab-Icon (ICON_BIG) unabhaengig von Tks eigener
+       Icon-Verwaltung."""
     if platform.system() != "Windows":
         return
     log_path = WORK_DIR / "icon_debug.log"
@@ -118,24 +119,64 @@ def _apply_window_icon(root: ctk.CTk) -> None:
         except OSError:
             pass
 
-    try:
-        base_dir = Path(sys._MEIPASS) / "app_icon" if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent / "app_icon"  # noqa: SLF001
-        import tkinter as tk
-        photos = []
-        for size in (16, 32, 48, 128, 256):
-            icon_path = base_dir / f"icon_{size}.png"
-            if not icon_path.exists():
-                log(f"uebersprungen (fehlt): {icon_path}")
-                continue
-            photos.append(tk.PhotoImage(file=str(icon_path)))
-        if not photos:
-            log(f"kein einziges Icon-PNG gefunden unter {base_dir}")
-            return
-        root.iconphoto(True, *photos)
-        root._window_icon_photos = photos  # Referenzen halten, sonst sammelt Tk die Bilder wieder ein
-        log(f"OK - {len(photos)} Groesse(n) gesetzt aus {base_dir}")
-    except Exception as exc:  # noqa: BLE001 - Icon ist rein kosmetisch, darf den Start nie verhindern
-        log(f"FEHLER: {type(exc).__name__}: {exc}")
+    base_dir = Path(sys._MEIPASS) / "app_icon" if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent / "app_icon"  # noqa: SLF001
+
+    def set_icon() -> None:
+        try:
+            import tkinter as tk
+            photos = []
+            for size in (16, 32, 48, 128, 256):
+                icon_path = base_dir / f"icon_{size}.png"
+                if icon_path.exists():
+                    photos.append(tk.PhotoImage(file=str(icon_path)))
+            if photos:
+                root.iconphoto(True, *photos)
+                root._window_icon_photos = photos  # Referenzen halten, sonst sammelt Tk die Bilder wieder ein
+                log(f"iconphoto OK - {len(photos)} Groesse(n) (verzoegert nach Fenster-Mapping)")
+            else:
+                log(f"iconphoto uebersprungen - kein Icon-PNG gefunden unter {base_dir}")
+        except Exception as exc:  # noqa: BLE001
+            log(f"iconphoto FEHLER: {type(exc).__name__}: {exc}")
+
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            icon_ico_path = base_dir / "icon.ico"
+            if not icon_ico_path.exists():
+                log(f"WM_SETICON uebersprungen - icon.ico fehlt unter {icon_ico_path}")
+                return
+
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            user32.LoadImageW.restype = wintypes.HANDLE
+            user32.LoadImageW.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR, wintypes.UINT, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+            user32.GetAncestor.restype = wintypes.HWND
+            user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+            user32.SendMessageW.restype = ctypes.c_void_p
+            user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+
+            IMAGE_ICON = 1
+            LR_LOADFROMFILE = 0x00000010
+            GA_ROOT = 2
+            WM_SETICON = 0x0080
+            ICON_SMALL = 0
+            ICON_BIG = 1
+
+            hwnd = root.winfo_id()
+            hwnd_root = user32.GetAncestor(hwnd, GA_ROOT) or hwnd
+
+            h_small = user32.LoadImageW(None, str(icon_ico_path), IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+            h_big = user32.LoadImageW(None, str(icon_ico_path), IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
+            if h_small:
+                user32.SendMessageW(hwnd_root, WM_SETICON, ICON_SMALL, h_small)
+            if h_big:
+                user32.SendMessageW(hwnd_root, WM_SETICON, ICON_BIG, h_big)
+            root._window_icon_handles = (h_small, h_big)  # Referenzen halten
+            log(f"WM_SETICON OK - hwnd={hwnd_root} small={h_small} big={h_big}")
+        except Exception as exc:  # noqa: BLE001
+            log(f"WM_SETICON FEHLER: {type(exc).__name__}: {exc}")
+
+    root.after(150, set_icon)
 
 
 class App(ctk.CTk):

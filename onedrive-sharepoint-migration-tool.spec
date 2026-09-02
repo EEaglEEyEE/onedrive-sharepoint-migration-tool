@@ -28,17 +28,19 @@ a = Analysis(  # noqa: F821
     # Tupel) - ein nachtraegliches a.datas += ... schlug fehl, weil a.datas
     # nach Analysis() bereits normalisierte 3-Tupel (dest, src, typecode)
     # enthaelt und die 2-Tupel-Form dort nicht mehr passt.
-    # Icon-PNGs (mehrere Groessen) als Datenfiles mitbuendeln (zusaetzlich zu
-    # EXE(icon=...) unten, das nur die .exe-Datei selbst betrifft): das
-    # Fenster-/Taskleisten-Icon setzt migration_gui/app.py zur Laufzeit per
-    # root.iconphoto() aus diesen PNGs (Tks eigener .ico-Parser kam mit den
-    # PNG-komprimierten kleinen Icon-Eintraegen in icon.ico nicht klar -
-    # verpixeltes Icon). Nur unter Windows noetig, macOS bekommt sein
+    # Icon-Dateien als Datenfiles mitbuendeln (zusaetzlich zu EXE(icon=...)
+    # unten, das nur die .exe-Datei selbst betrifft): migration_gui/app.py
+    # setzt das Fenster-/Taskleisten-Icon zur Laufzeit auf zwei Wegen (siehe
+    # _apply_window_icon dort) - root.iconphoto() aus den PNGs UND zusaetzlich
+    # WM_SETICON direkt per WinAPI aus icon.ico, deshalb werden hier beide
+    # Formate gebraucht. Nur unter Windows noetig, macOS bekommt sein
     # Dock-Icon bereits ueber BUNDLE(icon=...) unabhaengig von Tk.
     datas=collect_data_files("customtkinter") + (
         [
             (str(project_dir / "app_icon" / f"icon_{size}.png"), "app_icon")
             for size in (16, 32, 48, 128, 256)
+        ] + [
+            (str(project_dir / "app_icon" / "icon.ico"), "app_icon"),
         ] if is_windows else []
     ),
     hiddenimports=[],
