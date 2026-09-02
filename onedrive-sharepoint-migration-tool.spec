@@ -28,7 +28,17 @@ a = Analysis(  # noqa: F821
     # Tupel) - ein nachtraegliches a.datas += ... schlug fehl, weil a.datas
     # nach Analysis() bereits normalisierte 3-Tupel (dest, src, typecode)
     # enthaelt und die 2-Tupel-Form dort nicht mehr passt.
-    datas=collect_data_files("customtkinter"),
+    # icon.ico als Datenfile mitbuendeln (zusaetzlich zu EXE(icon=...) unten):
+    # EXE(icon=...) bettet das Icon nur in die PE-Ressourcen der .exe ein
+    # (das, was Explorer fuer die Datei anzeigt) - das SETZT NICHT automatisch
+    # das Fenster-/Taskleisten-Icon des laufenden Tkinter-Fensters, das ist
+    # eine eigene, von Tk selbst verwaltete Einstellung (siehe
+    # migration_gui/app.py, self.iconbitmap(...)). Nur unter Windows noetig,
+    # macOS bekommt sein Dock-Icon bereits ueber BUNDLE(icon=...) unabhaengig
+    # von Tk.
+    datas=collect_data_files("customtkinter") + (
+        [(str(project_dir / "app_icon" / "icon.ico"), "app_icon")] if is_windows else []
+    ),
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

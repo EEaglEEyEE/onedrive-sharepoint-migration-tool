@@ -8,6 +8,7 @@ import os
 import platform
 import queue
 import subprocess
+import sys
 import threading
 import tkinter.filedialog as filedialog
 from collections import defaultdict
@@ -83,6 +84,28 @@ def _close_splash() -> None:
         return
 
 
+def _apply_window_icon(root: ctk.CTk) -> None:
+    """Setzt das Fenster-/Taskleisten-Icon unter Windows. EXE(icon=...) im
+    .spec bettet das Icon nur in die PE-Ressourcen der .exe ein (das, was
+    Explorer fuer die Datei anzeigt) - das Tk-Fenster selbst zeigt trotzdem
+    Tks eigenes Standard-Icon, bis man es explizit per iconbitmap() setzt;
+    Windows liest Taskleisten-/Titelleisten-Icon von genau dieser
+    Tk-Einstellung, nicht automatisch von der .exe. macOS braucht das nicht -
+    das Dock-Icon kommt dort unabhaengig von Tk aus dem .app-Bundle (BUNDLE
+    (icon=...) im .spec, bereits korrekt)."""
+    if platform.system() != "Windows":
+        return
+    try:
+        if getattr(sys, "frozen", False):
+            icon_path = Path(sys._MEIPASS) / "app_icon" / "icon.ico"  # noqa: SLF001
+        else:
+            icon_path = Path(__file__).resolve().parent.parent / "app_icon" / "icon.ico"
+        if icon_path.exists():
+            root.iconbitmap(str(icon_path))
+    except Exception:  # noqa: BLE001 - Icon ist rein kosmetisch, darf den Start nie verhindern
+        pass
+
+
 class App(ctk.CTk):
     def __init__(self, args):
         super().__init__()
@@ -91,6 +114,7 @@ class App(ctk.CTk):
         self.title("OneDrive / SharePoint Migration")
         self.geometry("720x600")
         self.minsize(640, 520)
+        _apply_window_icon(self)
 
         self.container = ctk.CTkFrame(self, fg_color="transparent")
         self.container.pack(fill="both", expand=True, padx=16, pady=16)
