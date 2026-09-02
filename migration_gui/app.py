@@ -94,20 +94,24 @@ def _apply_window_icon(root: ctk.CTk) -> None:
     kommt dort unabhaengig von Tk aus dem .app-Bundle (BUNDLE(icon=...),
     bereits korrekt).
 
-    Zwei Ebenen, beide per icon_debug.log (neben accounts.conf) protokolliert
-    (das Icon ist rein kosmetisch, darf den Start nie verhindern):
-    1. iconphoto() mit mehreren PNG-Groessen - lief laut Log fehlerfrei durch,
-       zeigte aber trotzdem keine Wirkung. Wahrscheinliche Ursache: der aus
-       __init__() heraus VOR mainloop()/vor dem ersten Realisieren des
-       Fensters aufgerufene iconphoto() setzt Tks internen Zustand, ohne dass
-       Windows das tatsaechliche WM_SETICON schon zustellen kann - deshalb
-       jetzt per root.after() verzoegert, erst wenn mainloop tatsaechlich
-       laeuft und das Fenster real existiert.
-    2. Zusaetzlich (robuster, unabhaengig von Tk/CustomTkinter-Eigenheiten
-       rund um Fenster-Icons unter Windows) WM_SETICON direkt per WinAPI am
-       tatsaechlichen Top-Level-Fensterhandle - setzt Taskleisten-
-       (ICON_SMALL) und Alt-Tab-Icon (ICON_BIG) unabhaengig von Tks eigener
-       Icon-Verwaltung."""
+    WICHTIG: muss aufgerufen werden, WAEHREND das Fenster noch per
+    self.withdraw() versteckt ist (siehe App.__init__) - beide Versuche
+    unten liefen laut icon_debug.log bereits zweimal fehlerfrei durch (echte,
+    von Null verschiedene Icon-Handles bei WM_SETICON), ohne dass je ein
+    Icon sichtbar wurde. Wahrscheinlichste verbleibende Ursache: Windows legt
+    die Taskleisten-Schaltflaeche bereits BEIM ERSTEN SICHTBARWERDEN des
+    Fensters an (mit welchem Icon auch immer zu dem Zeitpunkt gesetzt ist)
+    und aktualisiert die Schaltflaeche danach nicht mehr automatisch, egal
+    wie korrekt ein spaeteres WM_SETICON ist - deshalb jetzt SYNCHRON und
+    VOR dem ersten deiconify() aufgerufen, nicht mehr per root.after()
+    verzoegert.
+
+    Zwei unabhaengige Ebenen, beide per icon_debug.log (neben accounts.conf)
+    protokolliert (das Icon ist rein kosmetisch, darf den Start nie
+    verhindern):
+    1. iconphoto() mit mehreren PNG-Groessen.
+    2. WM_SETICON direkt per WinAPI am tatsaechlichen Top-Level-
+       Fensterhandle - unabhaengig von Tks eigener Icon-Verwaltung."""
     if platform.system() != "Windows":
         return
     log_path = WORK_DIR / "icon_debug.log"
@@ -121,67 +125,75 @@ def _apply_window_icon(root: ctk.CTk) -> None:
 
     base_dir = Path(sys._MEIPASS) / "app_icon" if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent / "app_icon"  # noqa: SLF001
 
-    def set_icon() -> None:
-        try:
-            import tkinter as tk
-            photos = []
-            for size in (16, 32, 48, 128, 256):
-                icon_path = base_dir / f"icon_{size}.png"
-                if icon_path.exists():
-                    photos.append(tk.PhotoImage(file=str(icon_path)))
-            if photos:
-                root.iconphoto(True, *photos)
-                root._window_icon_photos = photos  # Referenzen halten, sonst sammelt Tk die Bilder wieder ein
-                log(f"iconphoto OK - {len(photos)} Groesse(n) (verzoegert nach Fenster-Mapping)")
-            else:
-                log(f"iconphoto uebersprungen - kein Icon-PNG gefunden unter {base_dir}")
-        except Exception as exc:  # noqa: BLE001
-            log(f"iconphoto FEHLER: {type(exc).__name__}: {exc}")
+    try:
+        import tkinter as tk
+        photos = []
+        for size in (16, 32, 48, 128, 256):
+            icon_path = base_dir / f"icon_{size}.png"
+            if icon_path.exists():
+                photos.append(tk.PhotoImage(file=str(icon_path)))
+        if photos:
+            root.iconphoto(True, *photos)
+            root._window_icon_photos = photos  # Referenzen halten, sonst sammelt Tk die Bilder wieder ein
+            log(f"iconphoto OK - {len(photos)} Groesse(n) (synchron, vor deiconify)")
+        else:
+            log(f"iconphoto uebersprungen - kein Icon-PNG gefunden unter {base_dir}")
+    except Exception as exc:  # noqa: BLE001
+        log(f"iconphoto FEHLER: {type(exc).__name__}: {exc}")
 
-        try:
-            import ctypes
-            from ctypes import wintypes
+    try:
+        import ctypes
+        from ctypes import wintypes
 
-            icon_ico_path = base_dir / "icon.ico"
-            if not icon_ico_path.exists():
-                log(f"WM_SETICON uebersprungen - icon.ico fehlt unter {icon_ico_path}")
-                return
+        icon_ico_path = base_dir / "icon.ico"
+        if not icon_ico_path.exists():
+            log(f"WM_SETICON uebersprungen - icon.ico fehlt unter {icon_ico_path}")
+            return
 
-            user32 = ctypes.WinDLL("user32", use_last_error=True)
-            user32.LoadImageW.restype = wintypes.HANDLE
-            user32.LoadImageW.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR, wintypes.UINT, ctypes.c_int, ctypes.c_int, wintypes.UINT]
-            user32.GetAncestor.restype = wintypes.HWND
-            user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
-            user32.SendMessageW.restype = ctypes.c_void_p
-            user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.LoadImageW.restype = wintypes.HANDLE
+        user32.LoadImageW.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR, wintypes.UINT, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        user32.GetAncestor.restype = wintypes.HWND
+        user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+        user32.SendMessageW.restype = ctypes.c_void_p
+        user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 
-            IMAGE_ICON = 1
-            LR_LOADFROMFILE = 0x00000010
-            GA_ROOT = 2
-            WM_SETICON = 0x0080
-            ICON_SMALL = 0
-            ICON_BIG = 1
+        IMAGE_ICON = 1
+        LR_LOADFROMFILE = 0x00000010
+        GA_ROOT = 2
+        WM_SETICON = 0x0080
+        ICON_SMALL = 0
+        ICON_BIG = 1
 
-            hwnd = root.winfo_id()
-            hwnd_root = user32.GetAncestor(hwnd, GA_ROOT) or hwnd
+        hwnd = root.winfo_id()
+        hwnd_root = user32.GetAncestor(hwnd, GA_ROOT) or hwnd
 
-            h_small = user32.LoadImageW(None, str(icon_ico_path), IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
-            h_big = user32.LoadImageW(None, str(icon_ico_path), IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
-            if h_small:
-                user32.SendMessageW(hwnd_root, WM_SETICON, ICON_SMALL, h_small)
-            if h_big:
-                user32.SendMessageW(hwnd_root, WM_SETICON, ICON_BIG, h_big)
-            root._window_icon_handles = (h_small, h_big)  # Referenzen halten
-            log(f"WM_SETICON OK - hwnd={hwnd_root} small={h_small} big={h_big}")
-        except Exception as exc:  # noqa: BLE001
-            log(f"WM_SETICON FEHLER: {type(exc).__name__}: {exc}")
-
-    root.after(150, set_icon)
+        h_small = user32.LoadImageW(None, str(icon_ico_path), IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+        h_big = user32.LoadImageW(None, str(icon_ico_path), IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
+        if h_small:
+            user32.SendMessageW(hwnd_root, WM_SETICON, ICON_SMALL, h_small)
+        if h_big:
+            user32.SendMessageW(hwnd_root, WM_SETICON, ICON_BIG, h_big)
+        root._window_icon_handles = (h_small, h_big)  # Referenzen halten
+        log(f"WM_SETICON OK - hwnd={hwnd_root} small={h_small} big={h_big} (synchron, vor deiconify)")
+    except Exception as exc:  # noqa: BLE001
+        log(f"WM_SETICON FEHLER: {type(exc).__name__}: {exc}")
 
 
 class App(ctk.CTk):
     def __init__(self, args):
         super().__init__()
+        # Unter Windows bleibt das Fenster bis zum expliziten deiconify() am
+        # Ende versteckt: Windows legt die Taskleisten-Schaltflaeche
+        # vermutlich beim ERSTEN Sichtbarwerden an (mit welchem Icon auch
+        # immer zu dem Zeitpunkt gesetzt ist) und aktualisiert sie danach
+        # nicht mehr automatisch - ein spaeteres WM_SETICON/iconphoto (auch
+        # per root.after() verzoegert) kam laut icon_debug.log zwar
+        # fehlerfrei durch, blieb aber wirkungslos. Icon wird deshalb
+        # SYNCHRON gesetzt, WAEHREND das Fenster noch unsichtbar ist.
+        is_windows = platform.system() == "Windows"
+        if is_windows:
+            self.withdraw()
         self.args = args
         self.wizard: dict = {}
         self.title("OneDrive / SharePoint Migration")
@@ -194,6 +206,8 @@ class App(ctk.CTk):
         self.current_frame = None
         self.show_home()
         _close_splash()
+        if is_windows:
+            self.deiconify()
 
     # ------------------------------------------------------------------
     # Navigation / Hintergrund-Ausfuehrung
