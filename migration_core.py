@@ -537,3 +537,53 @@ def write_dedupe_csv(rows: list[dict], output_path: str) -> None:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+# ============================================================
+# Loeschen aus einer hochgeladenen CSV-Liste (z.B. gefilterter Duplikate-Report)
+# ============================================================
+
+def read_delete_csv(csv_path: str) -> tuple[list[dict], int]:
+    """Liest eine CSV im Format des Duplikate-Reports (write_dedupe_csv) und
+    extrahiert eindeutige Dateipfade (Spalte 'Pfad') zum Loeschen - z.B. eine
+    in Excel auf die zu loeschenden Zeilen gefilterte Kopie des Reports
+    (etwa: alle .arw-Dateien, zu denen im selben Ordner eine .jpg mit
+    gleichem Namen existiert). Gibt (rows, skipped) zurueck - rows enthaelt
+    dicts mit 'path' und optional 'size' (aus der Spalte 'Groesse', falls
+    vorhanden und numerisch), skipped zaehlt Zeilen ohne verwertbaren Pfad.
+    Dedupliziert nach Pfad (eine Datei kann im Report in mehreren
+    Kategorie-Zeilen auftauchen)."""
+    seen: dict[str, dict] = {}
+    skipped = 0
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            path = (row.get("Pfad") or "").strip()
+            if not path:
+                skipped += 1
+                continue
+            if path in seen:
+                continue
+            raw_size = (row.get("Groesse") or "").strip()
+            seen[path] = {"path": path, "size": int(raw_size) if raw_size.isdigit() else None}
+    return list(seen.values()), skipped
+
+
+def delete_files_via_rclone(remote_name: str, paths: list[str], config_path: Path, env: dict) -> tuple[bool, str]:
+    """Loescht die angegebenen Dateien (Pfade relativ zur Remote-Wurzel, wie
+    sie im Duplikate-Report stehen) in einem Rutsch ueber 'rclone delete
+    --files-from'. Landet bei OneDrive/SharePoint ueblicherweise im
+    Papierkorb des Kontos (Microsoft Graph loescht standardmaessig dorthin,
+    kein sofortiges endgueltiges Loeschen) - das ist aber ein Verhalten der
+    jeweiligen Aufbewahrungsrichtlinie und keine harte Garantie dieses Tools.
+    Gibt (erfolgreich, kombinierte rclone-Ausgabe) zurueck."""
+    list_file = config_path.with_name(config_path.stem + "_delete_list.txt")
+    list_file.write_text("\n".join(paths), encoding="utf-8")
+    try:
+        result = subprocess.run(
+            [RCLONE_BIN, "delete", f"{remote_name}:", "--files-from", str(list_file), "--config", str(config_path)],
+            env=env, capture_output=True, text=True,
+        )
+        return result.returncode == 0, (result.stdout + result.stderr)
+    finally:
+        list_file.unlink(missing_ok=True)

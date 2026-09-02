@@ -24,6 +24,7 @@ from migration_core import (
     WORK_DIR,
     account_kind,
     build_report_rows,
+    delete_files_via_rclone,
     extract_error_lines,
     fetch_own_drive,
     find_rclone,
@@ -34,6 +35,7 @@ from migration_core import (
     list_saved_accounts,
     load_saved_account,
     log_manifest,
+    read_delete_csv,
     save_account,
     search_sharepoint_sites,
     slugify_for_filename,
@@ -49,6 +51,8 @@ from migration_gui.screens import (
     BusyScreen,
     DedupeOptionsScreen,
     DedupeResultsScreen,
+    DeleteResultsScreen,
+    DeleteReviewScreen,
     EndpointTypeScreen,
     ErrorScreen,
     HomeScreen,
@@ -709,6 +713,81 @@ class App(ctk.CTk):
                 DedupeResultsScreen, output_path=output_path, file_count=file_count,
                 groups_by_category=groups_by_category, files_by_category=files_by_category,
                 skipped_no_hash=skipped_no_hash, on_restart=self.show_home, on_quit=self.destroy,
+            )
+
+        self._run_async(work, on_success)
+
+    # ------------------------------------------------------------------
+    # Werkzeug 3: Aus CSV loeschen
+    # ------------------------------------------------------------------
+
+    def start_delete_from_csv_wizard(self) -> None:
+        env = os.environ.copy()
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        config_path = WORK_DIR / f"rclone_{timestamp}_{os.getpid()}.conf"
+        if self.args.ca_cert_bundle:
+            env["RCLONE_CA_CERT"] = self.args.ca_cert_bundle
+        env["RCLONE_CONFIG"] = str(config_path)
+        self.wizard = {"env": env, "config_path": config_path}
+        self._resolve_endpoint("delete", "Konto, aus dem gelöscht werden soll", self._after_delete_account_resolved, allow_local=False)
+
+    def _after_delete_account_resolved(self, info: dict) -> None:
+        self._set_frame(BusyScreen, text="Richte Verbindung ein...")
+        config_path = self.wizard["config_path"]
+        env = self.wizard["env"]
+
+        def work():
+            exit_code = create_onedrive_remote(
+                "delete", info["token"], info["drive_id"], info["drive_type"], config_path, env,
+                extra_config={"disable_site_permission": "true"} if info["kind"] == "onedrive" else None,
+            )
+            if exit_code != 0:
+                raise ToolError(f"Config fehlgeschlagen (Exit Code {exit_code}).", exit_code)
+            refreshed = refresh_remote_token("delete", config_path, env)
+            if refreshed is None:
+                raise ToolError(
+                    "Verbindung fehlgeschlagen - Token evtl. abgelaufen/ungültig. "
+                    "Bitte neu starten und beim Konto 'Neu anmelden' wählen.", 1,
+                )
+
+        self._run_async(work, on_success=lambda _r: self._pick_delete_csv())
+
+    def _pick_delete_csv(self) -> None:
+        path = filedialog.askopenfilename(title="CSV-Datei mit zu löschenden Dateien wählen", filetypes=[("CSV", "*.csv")])
+        if not path:
+            self._show_error_and_home("Keine CSV-Datei ausgewählt.")
+            return
+        try:
+            files, skipped = read_delete_csv(path)
+        except Exception as exc:  # noqa: BLE001 - CSV kommt von aussen (Nutzer-bearbeitet), Format/Encoding kann alles Moegliche sein
+            self._show_error_and_home(f"Konnte CSV nicht lesen: {exc}")
+            return
+        if not files:
+            self._show_error_and_home("Die CSV enthält keine verwertbaren Dateipfade (Spalte 'Pfad' erwartet, wie im Duplikate-Report).")
+            return
+        self.wizard["delete_files"] = files
+        self._set_frame(
+            DeleteReviewScreen, csv_path=path, files=files, skipped=skipped,
+            on_confirm=self._run_delete, on_cancel=self.show_home,
+        )
+
+    def _run_delete(self) -> None:
+        w = self.wizard
+        files = w["delete_files"]
+        self._set_frame(BusyScreen, text=f"Lösche {len(files)} Datei(en)...")
+        config_path = w["config_path"]
+        env = w["env"]
+
+        def work():
+            success, output = delete_files_via_rclone("delete", [f["path"] for f in files], config_path, env)
+            Path(config_path).unlink(missing_ok=True)
+            return success, output
+
+        def on_success(result):
+            success, output = result
+            self._set_frame(
+                DeleteResultsScreen, success=success, file_count=len(files), output=output,
+                on_restart=self.show_home, on_quit=self.destroy,
             )
 
         self._run_async(work, on_success)

@@ -67,6 +67,15 @@ class HomeScreen(ctk.CTkFrame):
             font=ctk.CTkFont(size=15, weight="bold"), command=app.start_dedupe_wizard,
         ).pack(pady=8)
 
+        ctk.CTkButton(
+            self, text="Aus CSV löschen", width=320, height=48,
+            font=ctk.CTkFont(size=15, weight="bold"), command=app.start_delete_from_csv_wizard,
+        ).pack(pady=8)
+        ctk.CTkLabel(
+            self, text="Löscht Dateien, deren Pfade in einer hochgeladenen CSV\n(z.B. ein gefilterter Duplikate-Report) stehen.",
+            font=ctk.CTkFont(size=11), text_color="gray60", justify="center",
+        ).pack(pady=(0, 8))
+
 
 class BusyScreen(ctk.CTkFrame):
     def __init__(self, master, app, text: str):
@@ -472,6 +481,72 @@ class DedupeResultsScreen(ctk.CTkFrame):
         row2.pack(pady=16)
         ctk.CTkButton(row2, text="Neuer Lauf", width=150, command=on_restart).pack(side="left", padx=6)
         ctk.CTkButton(row2, text="Beenden", width=150, **SECONDARY_BUTTON_STYLE, command=on_quit).pack(side="left", padx=6)
+
+
+class DeleteReviewScreen(ctk.CTkFrame):
+    def __init__(self, master, app, csv_path: str, files: list[dict], skipped: int, on_confirm, on_cancel):
+        super().__init__(master, fg_color="transparent")
+        ctk.CTkLabel(self, text="Aus CSV löschen", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(16, 4))
+        ctk.CTkLabel(self, text=csv_path, text_color="gray60", font=ctk.CTkFont(size=11), wraplength=560).pack(pady=(0, 8))
+
+        total_size = sum(f["size"] for f in files if f["size"] is not None)
+        unknown_size = any(f["size"] is None for f in files)
+        size_text = f"~{format_bytes(total_size)}" if not unknown_size else f"mindestens {format_bytes(total_size)} (einige Groessen unbekannt)"
+        ctk.CTkLabel(
+            self, text=f"{len(files)} Datei(en) werden gelöscht - {size_text}",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        ).pack(pady=(4, 2))
+        if skipped:
+            ctk.CTkLabel(
+                self, text=f"Hinweis: {skipped} Zeile(n) in der CSV ohne 'Pfad'-Spalte übersprungen.",
+                text_color="gray60", font=ctk.CTkFont(size=11),
+            ).pack(pady=(0, 4))
+
+        scroll = ctk.CTkScrollableFrame(self, width=560, height=260)
+        scroll.pack(pady=8)
+        for f in files:
+            size_label = format_bytes(f["size"]) if f["size"] is not None else "?"
+            ctk.CTkLabel(
+                scroll, text=f"{f['path']}   ({size_label})", anchor="w", font=ctk.CTkFont(size=11),
+            ).pack(anchor="w", pady=1, padx=4)
+
+        ctk.CTkLabel(
+            self, text="Landet üblicherweise im Papierkorb des Kontos (nicht sofort endgültig) -\nhängt von der Aufbewahrungsrichtlinie des Kontos ab.",
+            text_color="gray60", font=ctk.CTkFont(size=11), justify="center",
+        ).pack(pady=(8, 4))
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(pady=12)
+        ctk.CTkButton(
+            row, text=f"{len(files)} Datei(en) jetzt löschen", width=240, fg_color="#c0392b", hover_color="#992d22",
+            font=ctk.CTkFont(weight="bold"), command=on_confirm,
+        ).pack(side="left", padx=6)
+        ctk.CTkButton(row, text="Abbrechen", width=150, **SECONDARY_BUTTON_STYLE, command=on_cancel).pack(side="left", padx=6)
+
+
+class DeleteResultsScreen(ctk.CTkFrame):
+    def __init__(self, master, app, success: bool, file_count: int, output: str, on_restart, on_quit):
+        super().__init__(master, fg_color="transparent")
+        title = "Fertig" if success else "Fehler beim Löschen"
+        color = "#2fa84f" if success else "#d9534f"
+        ctk.CTkLabel(self, text=title, font=ctk.CTkFont(size=22, weight="bold"), text_color=color).pack(pady=(40, 8))
+        message = (
+            f"{file_count} Datei(en) erfolgreich gelöscht."
+            if success
+            else "Beim Löschen ist ein Fehler aufgetreten - siehe Details unten."
+        )
+        ctk.CTkLabel(self, text=message, wraplength=560, justify="center").pack(pady=8, padx=20)
+
+        if output.strip():
+            box = ctk.CTkTextbox(self, width=560, height=160, **ENTRY_STYLE)
+            box.pack(pady=8)
+            box.insert("1.0", output.strip())
+            box.configure(state="disabled")
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(pady=16)
+        ctk.CTkButton(row, text="Neuer Lauf", width=150, command=on_restart).pack(side="left", padx=6)
+        ctk.CTkButton(row, text="Beenden", width=150, **SECONDARY_BUTTON_STYLE, command=on_quit).pack(side="left", padx=6)
 
 
 def app_open(path) -> None:
