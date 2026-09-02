@@ -41,31 +41,61 @@ class ToolError(Exception):
         self.code = code
 
 
-def _resolve_work_dir() -> Path:
-    """Arbeitsverzeichnis (accounts.conf, rclone-Temp-Configs, Logs) liegt
-    IMMER neben dem laufenden Programm selbst - nie an einem hart codierten
-    Pfad wie z.B. "~/Claude/..." (dieser Ordner wurde bereits einmal
-    verschoben, was die alte fest verdrahtete Variante stillschweigend
-    ins Leere haette laufen lassen: eine neue, leere accounts.conf am alten
-    Pfad statt der echten gespeicherten Konten am neuen Pfad). So bleibt es
-    unabhaengig davon, wo der Ordner gerade liegt.
-    """
+def _legacy_work_dir() -> Path:
+    """Fruehere Logik (Ordner neben der laufenden Binary/dem Skript) - wird
+    nur noch fuer die einmalige Migration einer schon vorhandenen
+    accounts.conf in _resolve_work_dir() gebraucht, siehe dort."""
     if getattr(sys, "frozen", False):
         exe_path = Path(sys.executable).resolve()
         if ".app/Contents/MacOS" in str(exe_path):
-            # Eingebettete Kopie im .app-Bundle (Contents/MacOS/<name> IST die
-            # Binary selbst, siehe build_app.sh - kein Resources/launch.sh-
-            # Zwischenlayer mehr). Projektordner liegt trotzdem VIER Ebenen
-            # hoeher (MacOS -> Contents -> .app -> Projektordner) - MacOS und
-            # das fruehere Resources liegen auf derselben Tiefe unter
-            # Contents, das Entfernen des Trampolins hat daran nichts
-            # geaendert. Ein erster Fix hier war faelschlich auf drei Ebenen
-            # verkuerzt worden (real per Test aufgefallen: "Neue Anmeldung"
-            # statt der laengst gespeicherten Konten) - nur vier Ebenen landet
-            # tatsaechlich daneben, wo accounts.conf liegt.
             return exe_path.parent.parent.parent.parent
         return exe_path.parent
     return Path(__file__).resolve().parent
+
+
+def _default_app_data_dir() -> Path:
+    system = platform.system()
+    if system == "Windows":
+        base = Path(os.environ.get("APPDATA") or Path.home())
+    elif system == "Darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+    return base / "OneDrive-SharePoint-Migration-Tool"
+
+
+def _resolve_work_dir() -> Path:
+    """Arbeitsverzeichnis (accounts.conf, rclone-Temp-Configs, Logs) liegt in
+    einem STABILEN, betriebssystem-ueblichen Nutzerprofil-Verzeichnis (Windows:
+    %APPDATA%, macOS: ~/Library/Application Support) - NICHT mehr relativ zur
+    laufenden Binary/dem Skript wie zuvor. Der binary-relative Ansatz brach auf
+    zwei Arten: einmal beim Verschieben des Projektordners (accounts.conf am
+    alten Pfad blieb unsichtbar - der urspruengliche Grund fuer den
+    binary-relativen Ansatz ueberhaupt), und - schwerwiegender, real
+    beobachtet - unter macOS' "App Translocation": eine aus dem
+    Download-/Entpack-Ordner heraus gestartete .app (ohne vorher per Finder
+    verschoben zu werden) laeuft dort aus einem VERSTECKTEN, bei JEDEM Start
+    ZUFAELLIGEN, SCHREIBGESCHUETZTEN Temp-Pfad - accounts.conf liess sich
+    dort weder speichern (schreibgeschuetzt) noch je wiederfinden (naechster
+    Start = neuer Zufallspfad). Ein Verzeichnis im Nutzerprofil ist von
+    alledem unabhaengig, unabhaengig davon, von wo/wie die App gestartet wird.
+    """
+    work_dir = _default_app_data_dir()
+    accounts_path = work_dir / "accounts.conf"
+    if not accounts_path.exists():
+        # Einmalige Migration: existiert noch eine accounts.conf am alten,
+        # binary-relativen Pfad (von vor diesem Umstieg, oder aus einem
+        # regulaeren - nicht translozierten - Lauf), wird sie automatisch
+        # uebernommen, damit bereits gespeicherte Konten nicht verloren gehen.
+        # Best effort - darf den Start nie verhindern.
+        try:
+            legacy_accounts = _legacy_work_dir() / "accounts.conf"
+            if legacy_accounts.exists():
+                work_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(legacy_accounts, accounts_path)
+        except OSError:
+            pass
+    return work_dir
 
 
 WORK_DIR = _resolve_work_dir()
