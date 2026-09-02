@@ -94,17 +94,20 @@ def _apply_window_icon(root: ctk.CTk) -> None:
     kommt dort unabhaengig von Tk aus dem .app-Bundle (BUNDLE(icon=...),
     bereits korrekt).
 
-    WICHTIG: muss aufgerufen werden, WAEHREND das Fenster noch per
-    self.withdraw() versteckt ist (siehe App.__init__) - beide Versuche
-    unten liefen laut icon_debug.log bereits zweimal fehlerfrei durch (echte,
-    von Null verschiedene Icon-Handles bei WM_SETICON), ohne dass je ein
-    Icon sichtbar wurde. Wahrscheinlichste verbleibende Ursache: Windows legt
-    die Taskleisten-Schaltflaeche bereits BEIM ERSTEN SICHTBARWERDEN des
-    Fensters an (mit welchem Icon auch immer zu dem Zeitpunkt gesetzt ist)
-    und aktualisiert die Schaltflaeche danach nicht mehr automatisch, egal
-    wie korrekt ein spaeteres WM_SETICON ist - deshalb jetzt SYNCHRON und
-    VOR dem ersten deiconify() aufgerufen, nicht mehr per root.after()
-    verzoegert.
+    Ein Versuch, das Icon VOR dem ersten Sichtbarwerden zu setzen (per
+    self.withdraw()/deiconify() in App.__init__) fuehrte dazu, dass die .exe
+    ueberhaupt nicht mehr sichtbar oeffnete - vermutlich verlangt
+    CustomTkinter (o.ae. Windows-spezifischer Setup-Code, z.B. fuer den
+    dunklen Titelleisten-Modus) ein bereits sichtbares Fenster und blieb beim
+    withdraw()-Umweg haengen. Deshalb bewusst wieder SYNCHRON, aber OHNE
+    withdraw()-Umweg aufgerufen (direkt nach title()/geometry()/minsize() in
+    App.__init__, Fenster ganz normal sichtbar) - beide Versuche unten liefen
+    laut icon_debug.log bereits mehrfach fehlerfrei durch (echte, von Null
+    verschiedene Icon-Handles bei WM_SETICON), ohne dass je ein Icon
+    sichtbar wurde; die verbleibende Ursache (vermutlich Windows-Taskleisten-
+    Caching der Schaltflaeche beim ersten Sichtbarwerden) ist noch offen -
+    ein zuverlaessig startendes Fenster ohne Icon ist aber wichtiger als ein
+    Icon um den Preis eines nicht startenden Fensters.
 
     Zwei unabhaengige Ebenen, beide per icon_debug.log (neben accounts.conf)
     protokolliert (das Icon ist rein kosmetisch, darf den Start nie
@@ -183,17 +186,6 @@ def _apply_window_icon(root: ctk.CTk) -> None:
 class App(ctk.CTk):
     def __init__(self, args):
         super().__init__()
-        # Unter Windows bleibt das Fenster bis zum expliziten deiconify() am
-        # Ende versteckt: Windows legt die Taskleisten-Schaltflaeche
-        # vermutlich beim ERSTEN Sichtbarwerden an (mit welchem Icon auch
-        # immer zu dem Zeitpunkt gesetzt ist) und aktualisiert sie danach
-        # nicht mehr automatisch - ein spaeteres WM_SETICON/iconphoto (auch
-        # per root.after() verzoegert) kam laut icon_debug.log zwar
-        # fehlerfrei durch, blieb aber wirkungslos. Icon wird deshalb
-        # SYNCHRON gesetzt, WAEHREND das Fenster noch unsichtbar ist.
-        is_windows = platform.system() == "Windows"
-        if is_windows:
-            self.withdraw()
         self.args = args
         self.wizard: dict = {}
         self.title("OneDrive / SharePoint Migration")
@@ -206,8 +198,6 @@ class App(ctk.CTk):
         self.current_frame = None
         self.show_home()
         _close_splash()
-        if is_windows:
-            self.deiconify()
 
     # ------------------------------------------------------------------
     # Navigation / Hintergrund-Ausfuehrung
