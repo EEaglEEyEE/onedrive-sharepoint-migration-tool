@@ -469,6 +469,10 @@ def _dedupe_row(category: str, group_id: int, f: dict, share_label: str) -> dict
         "Pfad": f["Path"],
         "Groesse": f.get("Size", ""),
         "Letzte_Aenderung": f.get("ModTime", ""),
+        # Leere Spalte zum manuellen Markieren (ein "x") - die Grundlage fuer
+        # den spaeteren "Aus Excel loeschen"-Schritt: nur Zeilen mit einer
+        # Markierung hier werden dort geloescht, alle anderen bleiben stehen.
+        "Zu_loeschen": "",
     }
 
 
@@ -527,45 +531,111 @@ def build_report_rows(files: list[dict], own_label: str, foreign_names: set[str]
         group_id += 1
         rows += [_dedupe_row("3_nur_hash_gleich", group_id, f, share_label(f["Path"])) for f in group]
 
+    # Nach Kategorie gruppiert (die drei Kategorien sind bereits mit 1_/2_/3_
+    # praefigiert, sortieren sich also von selbst richtig), innerhalb einer
+    # Kategorie nach Groesse absteigend - die groessten (und damit fuers
+    # Aufraeumen lohnendsten) Dateien stehen so pro Kategorie oben.
+    def sort_key(row: dict):
+        try:
+            size = -int(row["Groesse"])
+        except (TypeError, ValueError):
+            size = 0
+        return (row["Kategorie"], size)
+
+    rows.sort(key=sort_key)
     return rows, skipped_no_hash
 
 
+DEDUPE_FIELDNAMES = ["Kategorie", "Gruppe", "Konto_Share", "Hash", "Dateiname", "Pfad", "Groesse", "Letzte_Aenderung", "Zu_loeschen"]
+
+
 def write_dedupe_csv(rows: list[dict], output_path: str) -> None:
-    fieldnames = ["Kategorie", "Gruppe", "Konto_Share", "Hash", "Dateiname", "Pfad", "Groesse", "Letzte_Aenderung"]
+    """Nur noch von der Terminal-Oberflaeche (migration_cli) genutzt - die GUI
+    schreibt seit dem Umstieg auf echtes Excel write_dedupe_xlsx() (siehe
+    dort), um das in deutschem Excel uebliche Komma/Semikolon-CSV-
+    Trennzeichenproblem zu umgehen."""
     # utf-8-sig: Excel unter Windows zeigt Umlaute ohne BOM sonst falsch an.
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=DEDUPE_FIELDNAMES)
         writer.writeheader()
         writer.writerows(rows)
 
 
+def write_dedupe_xlsx(rows: list[dict], output_path: str) -> None:
+    """Schreibt den Duplikate-Report als echtes .xlsx (statt CSV) - vermeidet
+    das Komma/Semikolon-Trennzeichenproblem, das deutsches Excel bei CSV-
+    Dateien sonst hat (Dezimaltrennzeichen Komma kollidiert mit dem
+    CSV-Standardtrennzeichen). Die letzte Spalte 'Zu_loeschen' bleibt leer -
+    dort markiert der Nutzer per 'x', welche Zeilen spaeter im 'Aus Excel
+    loeschen'-Schritt (siehe read_delete_report) tatsaechlich geloescht
+    werden sollen."""
+    import openpyxl
+    from openpyxl.styles import Font
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Duplikate"
+    ws.append(DEDUPE_FIELDNAMES)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    for row in rows:
+        ws.append([row.get(name, "") for name in DEDUPE_FIELDNAMES])
+    ws.freeze_panes = "A2"
+    widths = {"Kategorie": 18, "Gruppe": 8, "Konto_Share": 22, "Hash": 20, "Dateiname": 28, "Pfad": 45, "Groesse": 12, "Letzte_Aenderung": 20, "Zu_loeschen": 12}
+    for i, name in enumerate(DEDUPE_FIELDNAMES, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = widths.get(name, 15)
+    wb.save(output_path)
+
+
 # ============================================================
-# Loeschen aus einer hochgeladenen CSV-Liste (z.B. gefilterter Duplikate-Report)
+# Loeschen aus einem hochgeladenen (Excel- oder CSV-)Report
 # ============================================================
 
-def read_delete_csv(csv_path: str) -> tuple[list[dict], int]:
-    """Liest eine CSV im Format des Duplikate-Reports (write_dedupe_csv) und
-    extrahiert eindeutige Dateipfade (Spalte 'Pfad') zum Loeschen - z.B. eine
-    in Excel auf die zu loeschenden Zeilen gefilterte Kopie des Reports
-    (etwa: alle .arw-Dateien, zu denen im selben Ordner eine .jpg mit
-    gleichem Namen existiert). Gibt (rows, skipped) zurueck - rows enthaelt
-    dicts mit 'path' und optional 'size' (aus der Spalte 'Groesse', falls
-    vorhanden und numerisch), skipped zaehlt Zeilen ohne verwertbaren Pfad.
-    Dedupliziert nach Pfad (eine Datei kann im Report in mehreren
-    Kategorie-Zeilen auftauchen)."""
+def _read_table_rows(path: str) -> list[dict]:
+    """Liest eine Tabelle (.xlsx/.xlsm oder .csv) zeilenweise als Liste von
+    dicts (Spaltenname -> Zellwert als String) ein - gemeinsame Grundlage
+    fuer read_delete_report()."""
+    if Path(path).suffix.lower() in (".xlsx", ".xlsm"):
+        import openpyxl
+        wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+        ws = wb.active
+        rows_iter = ws.iter_rows(values_only=True)
+        header = [str(h).strip() if h is not None else "" for h in next(rows_iter, [])]
+        rows = []
+        for values in rows_iter:
+            if values is None or all(v is None for v in values):
+                continue
+            rows.append({header[i]: ("" if i >= len(values) or values[i] is None else str(values[i])) for i in range(len(header))})
+        return rows
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
+def read_delete_report(path: str) -> tuple[list[dict], int]:
+    """Liest einen Duplikate-Report (.xlsx oder .csv, write_dedupe_xlsx/
+    write_dedupe_csv-Format) und uebernimmt NUR die Zeilen, bei denen die
+    Spalte 'Zu_loeschen' ein 'x' enthaelt (Gross-/Kleinschreibung und
+    umgebende Leerzeichen egal) - alle anderen (nicht markierten) Zeilen
+    werden ignoriert, bleiben also erhalten. Gibt (rows, skipped) zurueck -
+    rows enthaelt dicts mit 'path' und optional 'size' (aus der Spalte
+    'Groesse', falls vorhanden und numerisch), skipped zaehlt markierte
+    Zeilen ohne verwertbaren Pfad. Dedupliziert nach Pfad (eine Datei kann im
+    Report in mehreren Kategorie-Zeilen auftauchen und mehrfach markiert
+    sein)."""
     seen: dict[str, dict] = {}
     skipped = 0
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            path = (row.get("Pfad") or "").strip()
-            if not path:
-                skipped += 1
-                continue
-            if path in seen:
-                continue
-            raw_size = (row.get("Groesse") or "").strip()
-            seen[path] = {"path": path, "size": int(raw_size) if raw_size.isdigit() else None}
+    for row in _read_table_rows(path):
+        marked = (row.get("Zu_loeschen") or "").strip().lower() == "x"
+        if not marked:
+            continue
+        path_value = (row.get("Pfad") or "").strip()
+        if not path_value:
+            skipped += 1
+            continue
+        if path_value in seen:
+            continue
+        raw_size = str(row.get("Groesse") or "").strip()
+        seen[path_value] = {"path": path_value, "size": int(raw_size) if raw_size.isdigit() else None}
     return list(seen.values()), skipped
 
 

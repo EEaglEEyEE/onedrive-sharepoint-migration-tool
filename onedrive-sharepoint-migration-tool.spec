@@ -140,6 +140,11 @@ if is_macos:
             "CFBundleVersion": "1.0.0",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
+            # Ohne diesen Schluessel bringt ein zweiter Doppelklick nur das
+            # bereits laufende Fenster nach vorne, statt eine zweite Instanz
+            # zu starten (macOS-Standardverhalten fuer .app-Bundles) - damit
+            # kann man z.B. zwei Konten gleichzeitig bearbeiten.
+            "LSMultipleInstancesProhibited": False,
         },
     )
 else:

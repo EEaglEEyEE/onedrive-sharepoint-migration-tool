@@ -79,11 +79,11 @@ if ($LASTEXITCODE -ne 0) {
     Fail "Das gefundene Python ($PythonCmd) hat kein funktionierendes tkinter (fuer die GUI benoetigt). Bitte die offizielle Python-Installation von https://www.python.org/downloads/ verwenden (bringt tkinter von Haus aus mit) und dieses Skript erneut ausfuehren."
 }
 
-# --- PyInstaller + customtkinter installieren/aktualisieren ---
-Write-Host "`nInstalliere/aktualisiere PyInstaller und customtkinter..."
-& $PythonCmd -m pip install --quiet --upgrade pyinstaller customtkinter
+# --- PyInstaller + customtkinter + openpyxl installieren/aktualisieren ---
+Write-Host "`nInstalliere/aktualisiere PyInstaller, customtkinter und openpyxl..."
+& $PythonCmd -m pip install --quiet --upgrade pyinstaller customtkinter openpyxl
 if ($LASTEXITCODE -ne 0) {
-    Fail "'pip install pyinstaller customtkinter' fehlgeschlagen (Exit Code $LASTEXITCODE)."
+    Fail "'pip install pyinstaller customtkinter openpyxl' fehlgeschlagen (Exit Code $LASTEXITCODE)."
 }
 
 # --- rclone.exe sicherstellen ---

@@ -56,8 +56,8 @@ fi
 # --- PyInstaller + customtkinter installieren/aktualisieren ---
 echo ""
 echo "Installiere/aktualisiere PyInstaller und customtkinter..."
-"$PYTHON_CMD" -m pip install --quiet --upgrade pyinstaller customtkinter \
-    || fail "'pip install pyinstaller customtkinter' fehlgeschlagen."
+"$PYTHON_CMD" -m pip install --quiet --upgrade pyinstaller customtkinter openpyxl \
+    || fail "'pip install pyinstaller customtkinter openpyxl' fehlgeschlagen."
 
 # --- rclone-Binary (macOS) sicherstellen ---
 RCLONE_PATH="$PROJECT_DIR/rclone"

@@ -35,13 +35,13 @@ from migration_core import (
     list_saved_accounts,
     load_saved_account,
     log_manifest,
-    read_delete_csv,
+    read_delete_report,
     save_account,
     search_sharepoint_sites,
     slugify_for_filename,
     suggest_account_name,
     sync_account_token,
-    write_dedupe_csv,
+    write_dedupe_xlsx,
 )
 from migration_cli import create_onedrive_remote, install_rclone, list_files_for_dedupe, rclone_authorize_onedrive, refresh_remote_token
 
@@ -670,7 +670,7 @@ class App(ctk.CTk):
         own_label = scan_info.get("account_name") or scan_info["identity"]
         vault_names = [item["name"] for item in items if item["is_locked_vault"]]
         foreign_names = [item["name"] for item in items if item["is_foreign"]]
-        default_output = str(DESKTOP_DIR / f"dedupe_report_{slugify_for_filename(own_label)}_{w['timestamp']}.csv")
+        default_output = str(DESKTOP_DIR / f"dedupe_report_{slugify_for_filename(own_label)}_{w['timestamp']}.xlsx")
         self._set_frame(
             DedupeOptionsScreen, default_output=default_output, vault_names=vault_names, foreign_names=foreign_names,
             on_submit=self._run_dedupe_scan,
@@ -696,7 +696,7 @@ class App(ctk.CTk):
             if files is None:
                 raise ToolError("Konnte Konto nicht durchsuchen (rclone lsjson fehlgeschlagen).", 1)
             rows, skipped_no_hash = build_report_rows(files, own_label, foreign_names)
-            write_dedupe_csv(rows, output_path)
+            write_dedupe_xlsx(rows, output_path)
             if scan_info.get("account_name"):
                 sync_account_token(scan_info["account_name"], "scan", w["config_path"])
             Path(w["config_path"]).unlink(missing_ok=True)
@@ -753,17 +753,22 @@ class App(ctk.CTk):
         self._run_async(work, on_success=lambda _r: self._pick_delete_csv())
 
     def _pick_delete_csv(self) -> None:
-        path = filedialog.askopenfilename(title="CSV-Datei mit zu löschenden Dateien wählen", filetypes=[("CSV", "*.csv")])
+        path = filedialog.askopenfilename(
+            title="Report-Datei waehlen (Excel oder CSV, mit 'x' in der Spalte 'Zu_loeschen' markiert)",
+            filetypes=[("Excel/CSV", "*.xlsx *.xlsm *.csv"), ("Excel", "*.xlsx *.xlsm"), ("CSV", "*.csv")],
+        )
         if not path:
-            self._show_error_and_home("Keine CSV-Datei ausgewählt.")
+            self._show_error_and_home("Keine Datei ausgewählt.")
             return
         try:
-            files, skipped = read_delete_csv(path)
-        except Exception as exc:  # noqa: BLE001 - CSV kommt von aussen (Nutzer-bearbeitet), Format/Encoding kann alles Moegliche sein
-            self._show_error_and_home(f"Konnte CSV nicht lesen: {exc}")
+            files, skipped = read_delete_report(path)
+        except Exception as exc:  # noqa: BLE001 - Datei kommt von aussen (Nutzer-bearbeitet), Format/Encoding kann alles Moegliche sein
+            self._show_error_and_home(f"Konnte Datei nicht lesen: {exc}")
             return
         if not files:
-            self._show_error_and_home("Die CSV enthält keine verwertbaren Dateipfade (Spalte 'Pfad' erwartet, wie im Duplikate-Report).")
+            self._show_error_and_home(
+                "Keine markierten Zeilen gefunden. Bitte in der Spalte 'Zu_loeschen' bei den gewünschten Zeilen ein 'x' eintragen und erneut hochladen."
+            )
             return
         self.wizard["delete_files"] = files
         self._set_frame(

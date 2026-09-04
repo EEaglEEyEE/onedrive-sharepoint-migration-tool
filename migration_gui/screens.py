@@ -68,11 +68,11 @@ class HomeScreen(ctk.CTkFrame):
         ).pack(pady=8)
 
         ctk.CTkButton(
-            self, text="Aus CSV löschen", width=320, height=48,
+            self, text="Aus Excel löschen", width=320, height=48,
             font=ctk.CTkFont(size=15, weight="bold"), command=app.start_delete_from_csv_wizard,
         ).pack(pady=8)
         ctk.CTkLabel(
-            self, text="Löscht Dateien, deren Pfade in einer hochgeladenen CSV\n(z.B. ein gefilterter Duplikate-Report) stehen.",
+            self, text="Löscht Dateien aus einem hochgeladenen Duplikate-Report,\nbei denen 'x' in der Spalte 'Zu_loeschen' steht.",
             font=ctk.CTkFont(size=11), text_color="gray60", justify="center",
         ).pack(pady=(0, 8))
 
@@ -411,7 +411,7 @@ class DedupeOptionsScreen(ctk.CTkFrame):
                 text_color="gray60", font=ctk.CTkFont(size=11),
             ).pack(pady=(2, 0))
 
-        ctk.CTkLabel(self, text="CSV-Ausgabepfad", font=ctk.CTkFont(size=13, weight="bold")).pack(pady=(20, 4))
+        ctk.CTkLabel(self, text="Excel-Ausgabepfad", font=ctk.CTkFont(size=13, weight="bold")).pack(pady=(20, 4))
         path_row = ctk.CTkFrame(self, fg_color="transparent")
         path_row.pack()
         # textvariable statt entry.insert(): ein Insert direkt nach dem
@@ -429,12 +429,16 @@ class DedupeOptionsScreen(ctk.CTkFrame):
 
         self.error_label = ctk.CTkLabel(self, text="", text_color="#d9534f")
         self.error_label.pack(pady=(8, 0))
-        ctk.CTkButton(self, text="Duplikate suchen", width=220, font=ctk.CTkFont(weight="bold"), command=self._submit).pack(pady=16)
+        ctk.CTkButton(self, text="Duplikate suchen", width=220, font=ctk.CTkFont(weight="bold"), command=self._submit).pack(pady=(16, 4))
+        ctk.CTkLabel(
+            self, text="Tipp: In der fertigen Excel-Datei bei den zu löschenden Zeilen ein 'x' in\nder Spalte 'Zu_loeschen' eintragen, dann bei 'Aus Excel löschen' hochladen.",
+            text_color="gray60", font=ctk.CTkFont(size=11), justify="center",
+        ).pack(pady=(0, 8))
 
     def _browse(self) -> None:
         import tkinter.filedialog as filedialog
         path = filedialog.asksaveasfilename(
-            title="CSV-Ausgabepfad wählen", defaultextension=".csv", filetypes=[("CSV", "*.csv")],
+            title="Excel-Ausgabepfad wählen", defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")],
             initialfile=self.path_var.get().split("/")[-1],
         )
         if path:
@@ -443,7 +447,7 @@ class DedupeOptionsScreen(ctk.CTkFrame):
     def _submit(self) -> None:
         output_path = self.path_var.get().strip()
         if not output_path:
-            self.error_label.configure(text="Bitte einen CSV-Ausgabepfad angeben.")
+            self.error_label.configure(text="Bitte einen Excel-Ausgabepfad angeben.")
             return
         excludes = [p.strip() for p in self.excludes_entry.get().split(",") if p.strip()]
         self.on_submit(output_path, excludes)
@@ -475,7 +479,7 @@ class DedupeResultsScreen(ctk.CTkFrame):
 
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(pady=8)
-        ctk.CTkButton(row, text="CSV öffnen", width=150, command=lambda: app_open(output_path)).pack(side="left", padx=6)
+        ctk.CTkButton(row, text="Excel öffnen", width=150, command=lambda: app_open(output_path)).pack(side="left", padx=6)
 
         row2 = ctk.CTkFrame(self, fg_color="transparent")
         row2.pack(pady=16)
@@ -486,19 +490,19 @@ class DedupeResultsScreen(ctk.CTkFrame):
 class DeleteReviewScreen(ctk.CTkFrame):
     def __init__(self, master, app, csv_path: str, files: list[dict], skipped: int, on_confirm, on_cancel):
         super().__init__(master, fg_color="transparent")
-        ctk.CTkLabel(self, text="Aus CSV löschen", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(16, 4))
+        ctk.CTkLabel(self, text="Aus Excel löschen", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(16, 4))
         ctk.CTkLabel(self, text=csv_path, text_color="gray60", font=ctk.CTkFont(size=11), wraplength=560).pack(pady=(0, 8))
 
         total_size = sum(f["size"] for f in files if f["size"] is not None)
         unknown_size = any(f["size"] is None for f in files)
         size_text = f"~{format_bytes(total_size)}" if not unknown_size else f"mindestens {format_bytes(total_size)} (einige Groessen unbekannt)"
         ctk.CTkLabel(
-            self, text=f"{len(files)} Datei(en) werden gelöscht - {size_text}",
+            self, text=f"{len(files)} mit 'x' markierte Datei(en) werden gelöscht - {size_text}",
             font=ctk.CTkFont(size=14, weight="bold"),
         ).pack(pady=(4, 2))
         if skipped:
             ctk.CTkLabel(
-                self, text=f"Hinweis: {skipped} Zeile(n) in der CSV ohne 'Pfad'-Spalte übersprungen.",
+                self, text=f"Hinweis: {skipped} markierte Zeile(n) ohne 'Pfad'-Spalte übersprungen.",
                 text_color="gray60", font=ctk.CTkFont(size=11),
             ).pack(pady=(0, 4))
 
