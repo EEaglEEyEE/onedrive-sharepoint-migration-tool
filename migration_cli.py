@@ -497,13 +497,14 @@ def run_copy_with_retry(
     print(f"\n--- Kopiere {source_spec} -> {target_spec} ---")
     log_manifest(log_file, f"Kopiere {source_spec} -> {target_spec}")
     exit_code = 1
-    for attempt in range(1, COPY_RETRY_ATTEMPTS + 1):
-        if attempt > 1:
-            print(f"\nWiederhole fehlgeschlagene Dateien (Versuch {attempt}/{COPY_RETRY_ATTEMPTS}) fuer {source_spec} -> {target_spec}...")
-            log_manifest(log_file, f"Retry {attempt}/{COPY_RETRY_ATTEMPTS}: {source_spec} -> {target_spec}")
-        exit_code = run(cmd, env, display_cmd=display_cmd)
-        if exit_code == 0:
-            break
+    with prevent_system_sleep():
+        for attempt in range(1, COPY_RETRY_ATTEMPTS + 1):
+            if attempt > 1:
+                print(f"\nWiederhole fehlgeschlagene Dateien (Versuch {attempt}/{COPY_RETRY_ATTEMPTS}) fuer {source_spec} -> {target_spec}...")
+                log_manifest(log_file, f"Retry {attempt}/{COPY_RETRY_ATTEMPTS}: {source_spec} -> {target_spec}")
+            exit_code = run(cmd, env, display_cmd=display_cmd)
+            if exit_code == 0:
+                break
     return exit_code
 
 
@@ -743,7 +744,8 @@ def list_files_for_dedupe(remote: str, env: dict, excludes: list[str]) -> list[d
         cmd += ["--exclude", pattern]
 
     print(f"Frage '{remote}' ab (rclone lsjson -R --hash) - bei grossen Strukturen kann das einen Moment dauern...")
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    with prevent_system_sleep():
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"rclone lsjson fehlgeschlagen (Exit Code {result.returncode}):\n{result.stderr}")
         return None

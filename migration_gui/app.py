@@ -35,6 +35,7 @@ from migration_core import (
     list_saved_accounts,
     load_saved_account,
     log_manifest,
+    prevent_system_sleep,
     read_delete_report,
     save_account,
     search_sharepoint_sites,
@@ -223,7 +224,8 @@ class App(ctk.CTk):
         ein Hintergrund-Thread darf dabei nie einfach lautlos sterben."""
         def runner():
             try:
-                result = work_fn()
+                with prevent_system_sleep():
+                    result = work_fn()
             except Exception as exc:  # noqa: BLE001 - bewusst breit, siehe Docstring
                 handler = on_error if on_error is not None else (lambda e: self._show_error_and_home(str(e)))
                 self.after(0, handler, exc)

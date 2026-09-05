@@ -5,6 +5,7 @@ Konten-Speicher (accounts.conf), Pfad-/Hash-Helfer und rclone-Kommandozeilen-
 Bausteine, die beide Oberflaechen identisch brauchen."""
 
 import configparser
+import contextlib
 import csv
 import json
 import os
@@ -160,6 +161,49 @@ def open_in_viewer(path) -> None:
             subprocess.run(["xdg-open", str(path)], check=False)
     except OSError:
         pass
+
+
+@contextlib.contextmanager
+def prevent_system_sleep():
+    """Verhindert waehrend eines Kopier-/Scan-/Loesch-Vorgangs, dass das
+    Betriebssystem in den (automatischen) Ruhezustand geht - der Bildschirm
+    darf trotzdem ausgehen, das Tool soll gerade DANN im Hintergrund
+    weiterlaufen. macOS: eigener 'caffeinate -i'-Hintergrundprozess fuer die
+    Dauer des with-Blocks. Windows: SetThreadExecutionState (ohne
+    ES_DISPLAY_REQUIRED, damit nur der System-Schlaf, nicht der Bildschirm,
+    unterdrueckt wird), zurueckgesetzt sobald der Block verlassen wird -
+    auch bei einer Exception (finally). Linux/sonstige Plattformen: No-Op,
+    da hierfuer kein einheitlicher Mechanismus existiert."""
+    system = platform.system()
+    if system == "Darwin":
+        proc = None
+        try:
+            proc = subprocess.Popen(["caffeinate", "-i"])
+        except OSError:
+            proc = None
+        try:
+            yield
+        finally:
+            if proc is not None:
+                proc.terminate()
+                proc.wait()
+    elif system == "Windows":
+        import ctypes
+        ES_CONTINUOUS = 0x80000000
+        ES_SYSTEM_REQUIRED = 0x00000001
+        try:
+            ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)  # type: ignore[attr-defined]
+        except (AttributeError, OSError):
+            pass
+        try:
+            yield
+        finally:
+            try:
+                ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)  # type: ignore[attr-defined]
+            except (AttributeError, OSError):
+                pass
+    else:
+        yield
 
 
 def log_manifest(log_file: Path, message: str) -> None:
